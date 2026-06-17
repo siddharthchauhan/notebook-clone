@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+server/.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# uv
+# (uv.lock IS committed for reproducible installs)
+
+# Node / Vite
+node_modules/
+web/dist/
+*.local
+.vite/
+
+# Runtime notebook data (seeded from the hardcoded starter)
+server/notebooks/*.ipynb
+
+# Env / editor
+.env
+.DS_Store
+.idea/
+.vscode/
+
+# TypeScript incremental build info
+*.tsbuildinfo
