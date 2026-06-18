@@ -1,7 +1,7 @@
 import DOMPurify from "dompurify";
 import katex from "katex";
 import type { Output } from "../../lib/store";
-import { stripAnsi } from "../../lib/ansi";
+import { ansiToHtml, stripAnsi } from "../../lib/ansi";
 
 // Full Phase 2 MIME set: text/html, image/svg+xml, image/png|jpeg, text/latex,
 // application/json, text/plain — plus stream and error outputs. For a display
@@ -22,11 +22,16 @@ function OutputItem({ output }: { output: Output }) {
     case "stream":
       return <pre className={`output stream ${output.name}`}>{output.text}</pre>;
     case "error":
+      // ansiToHtml HTML-escapes its input, so this is safe to inject.
       return (
-        <pre className="output error">
-          {stripAnsi(output.traceback.join("\n")) ||
-            `${output.ename}: ${output.evalue}`}
-        </pre>
+        <pre
+          className="output error"
+          dangerouslySetInnerHTML={{
+            __html: ansiToHtml(
+              output.traceback.join("\n") || `${output.ename}: ${output.evalue}`,
+            ),
+          }}
+        />
       );
     case "display":
       return <DisplayOutput data={output.data} />;

@@ -107,6 +107,46 @@ try {
   const mdh1 = await mdCell.locator(".markdown-rendered h1").textContent();
   check("markdown render", mdh1?.includes("Hello E2E"), `mdh1=${JSON.stringify(mdh1)}`);
 
+  // 8) ANSI-colored traceback -> error output contains colored <span>s
+  await setSource(1, "1/0");
+  await runAndWaitIdle(codeCell, 1);
+  const spanCount = await codeCell.locator(".output.error span").count();
+  check("ansi-colored traceback", spanCount > 0, `spans=${spanCount}`);
+
+  // 9) queued indicator: long cell + quick cell, run-all -> quick one is queued
+  await setSource(1, "import time; time.sleep(1.5)");
+  await setSource(2, "print('done2')");
+  await page.locator(".toolbar button", { hasText: "Run all" }).click();
+  const sawQueued = await page
+    .waitForFunction(
+      () => window.__store.getState().cells.some((c) => c.execution_state === "queued"),
+      null,
+      { timeout: 5000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("queued indicator", sawQueued, "");
+  await page.waitForFunction(
+    () => window.__store.getState().cells.every((c) => c.execution_state === "idle"),
+    null,
+    { timeout: 20000 },
+  );
+
+  // 10) checkpoint create -> restore dropdown becomes enabled with an option
+  await page.locator(".toolbar button", { hasText: "Checkpoint" }).click();
+  const checkpointOk = await page
+    .waitForFunction(
+      () => {
+        const sel = document.querySelector(".restore-select");
+        return sel && !sel.disabled && sel.options.length > 1;
+      },
+      null,
+      { timeout: 5000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("checkpoint created", checkpointOk, "");
+
   check("no console errors", consoleErrors.length === 0, consoleErrors.slice(0, 3).join(" | "));
 } catch (e) {
   check("script completed", false, String(e).split("\n")[0]);

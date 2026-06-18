@@ -11,8 +11,6 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
   const [inspect, setInspect] = useState<string | null>(null);
   if (!cell) return null;
 
-  const busy = cell.execution_state === "busy";
-
   const run = () => {
     const state = useStore.getState();
     const latest = state.cells.find((c) => c.id === cellId);
@@ -21,9 +19,11 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
       state.setRendered(cellId, true);
       return;
     }
-    if (latest.execution_state === "busy") return;
+    // Already running or waiting its turn — don't double-submit.
+    if (latest.execution_state === "busy" || latest.execution_state === "queued") return;
     setInspect(null);
     state.clearOutputs(cellId);
+    state.markQueued(cellId);
     socket.execute(cellId, latest.source);
   };
 
@@ -31,7 +31,7 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
 
   return (
     <div className={`cell ${cell.cell_type}`}>
-      <CellToolbar cell={cell} busy={busy} onRun={run} />
+      <CellToolbar cell={cell} onRun={run} />
       <div className="cell-body">
         {showRenderedMarkdown ? (
           <div
@@ -68,30 +68,32 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
   );
 }
 
-function CellToolbar({
-  cell,
-  busy,
-  onRun,
-}: {
-  cell: CellState;
-  busy: boolean;
-  onRun: () => void;
-}) {
+function CellToolbar({ cell, onRun }: { cell: CellState; onRun: () => void }) {
   const { addCell, deleteCell, moveCell, setCellType } = useStore.getState();
 
-  const prompt = busy
-    ? "[*]"
-    : cell.execution_count != null
-      ? `[${cell.execution_count}]`
-      : "[ ]";
+  const busy = cell.execution_state === "busy";
+  const queued = cell.execution_state === "queued";
+  const pending = busy || queued;
+
+  const runLabel =
+    cell.cell_type === "markdown"
+      ? "▶ Render"
+      : busy
+        ? "Running…"
+        : queued
+          ? "Queued…"
+          : "▶ Run";
 
   return (
     <div className="cell-toolbar">
-      <button className="run-btn" onClick={onRun} disabled={busy}>
-        {cell.cell_type === "markdown" ? "▶ Render" : busy ? "Running…" : "▶ Run"}
+      <button className="run-btn" onClick={onRun} disabled={pending}>
+        {runLabel}
       </button>
-      {cell.cell_type === "code" && <span className="prompt">{prompt}</span>}
+      {cell.cell_type === "code" && (
+        <span className="prompt">{pending ? "[*]" : cell.execution_count != null ? `[${cell.execution_count}]` : "[ ]"}</span>
+      )}
       {busy && <span className="spinner" role="status" aria-label="busy" />}
+      {queued && <span className="queued-tag">queued</span>}
       <span className="spacer" />
       <select
         className="type-select"

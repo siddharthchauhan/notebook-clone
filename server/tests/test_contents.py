@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import nbformat
+import pytest
 
 from app.contents import store
 
@@ -63,3 +64,34 @@ def test_load_seeds_starter_when_absent(tmp_path, monkeypatch):
     assert len(doc["cells"]) == 2
     assert doc["cells"][0]["cell_type"] == "markdown"
     assert doc["cells"][1]["cell_type"] == "code"
+
+
+def _doc(source: str) -> dict:
+    return {
+        "cells": [{"id": "c1", "cell_type": "code", "source": source, "outputs": []}],
+        "metadata": {},
+    }
+
+
+def test_checkpoint_create_list_restore(tmp_path, monkeypatch):
+    monkeypatch.setattr(store, "NOTEBOOKS_DIR", tmp_path)
+    store.save_document("nb", _doc("x = 1"))
+
+    cp = store.create_checkpoint("nb")
+    assert cp["id"] and cp["last_modified"]
+
+    # Move the notebook forward, then restore the checkpoint.
+    store.save_document("nb", _doc("x = 999"))
+    assert store.load_document("nb")["cells"][0]["source"] == "x = 999"
+    assert any(c["id"] == cp["id"] for c in store.list_checkpoints("nb"))
+
+    restored = store.restore_checkpoint("nb", cp["id"])
+    assert restored["cells"][0]["source"] == "x = 1"
+    assert store.load_document("nb")["cells"][0]["source"] == "x = 1"
+
+
+def test_restore_unknown_checkpoint_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(store, "NOTEBOOKS_DIR", tmp_path)
+    store.save_document("nb", _doc("x = 1"))
+    with pytest.raises(FileNotFoundError):
+        store.restore_checkpoint("nb", "does-not-exist")

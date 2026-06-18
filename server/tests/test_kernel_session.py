@@ -137,6 +137,20 @@ async def test_restart_clears_state_and_emits_status(kernel):
     assert any(e["ename"] == "NameError" for e in collector.of_type("b", "error"))
 
 
+async def test_run_all_aborts_remaining_after_error(kernel):
+    """After an error, queued cells are aborted and reset to idle (not stuck)."""
+    session, collector = kernel
+    session.execute("boom", "raise ValueError('boom')")
+    session.execute("after", "print('should not run')")
+
+    await collector.wait_idle("boom")
+    # The aborted cell still gets an idle (synthesized from execute_reply),
+    # but never actually ran, so it produced no stream output.
+    await collector.wait_idle("after", timeout=10)
+    assert collector.of_type("after", "stream") == []
+    assert collector.of_type("boom", "error")[0]["ename"] == "ValueError"
+
+
 async def test_complete_returns_matches(kernel):
     session, collector = kernel
     session.execute("setup", "import os")

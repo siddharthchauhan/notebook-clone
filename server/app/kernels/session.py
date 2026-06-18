@@ -28,7 +28,12 @@ from jupyter_client import AsyncKernelManager
 
 from app.config import settings
 from app.kernels.translate import to_client_event
-from app.models import CompleteReplyEvent, InspectReplyEvent, KernelStatusEvent
+from app.models import (
+    CompleteReplyEvent,
+    InspectReplyEvent,
+    KernelStatusEvent,
+    StatusEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +232,17 @@ class KernelSession:
             msg_type = msg["header"]["msg_type"]
             content = msg["content"]
             parent_id = msg.get("parent_header", {}).get("msg_id")
+
+            # When a run-all hits an error, the kernel aborts the remaining
+            # queued execute_requests with an 'aborted' reply and *no* iopub
+            # idle — so reset those cells here, or they'd stay "queued" forever.
+            if msg_type == "execute_reply" and content.get("status") == "aborted":
+                cell_id = self.msg_to_cell.pop(parent_id, None) if parent_id else None
+                if cell_id is not None:
+                    await self._broadcast(
+                        StatusEvent(cell_id=cell_id, execution_state="idle").model_dump()
+                    )
+                continue
 
             request_id = (
                 self.pending_requests.pop(parent_id, None) if parent_id else None

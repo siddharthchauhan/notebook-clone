@@ -65,6 +65,35 @@ export async function saveDocument(
   if (!r.ok) throw new Error(`save failed: ${r.status}`);
 }
 
+export interface Checkpoint {
+  id: string;
+  last_modified: string;
+}
+
+export async function listCheckpoints(notebookId: string): Promise<Checkpoint[]> {
+  const r = await fetch(`/api/contents/${notebookId}/checkpoints`);
+  if (!r.ok) throw new Error(`list checkpoints failed: ${r.status}`);
+  return r.json();
+}
+
+export async function createCheckpoint(notebookId: string): Promise<Checkpoint> {
+  const r = await fetch(`/api/contents/${notebookId}/checkpoints`, { method: "POST" });
+  if (!r.ok) throw new Error(`create checkpoint failed: ${r.status}`);
+  return r.json();
+}
+
+export async function restoreCheckpoint(
+  notebookId: string,
+  checkpointId: string,
+): Promise<CellState[]> {
+  const r = await fetch(
+    `/api/contents/${notebookId}/checkpoints/${checkpointId}/restore`,
+    { method: "POST" },
+  );
+  if (!r.ok) throw new Error(`restore checkpoint failed: ${r.status}`);
+  return documentToCells(await r.json());
+}
+
 export interface KernelSpec {
   name: string;
   display_name: string;

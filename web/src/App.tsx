@@ -4,9 +4,13 @@ import { useStore, emptyCell } from "./lib/store";
 import { Notebook } from "./Notebook";
 import { Toolbar } from "./components/Toolbar";
 import {
+  createCheckpoint,
+  listCheckpoints,
   loadDocument,
   loadKernelSpecs,
+  restoreCheckpoint,
   saveDocument,
+  type Checkpoint,
   type KernelSpec,
 } from "./lib/document";
 
@@ -20,8 +24,17 @@ export default function App() {
   const [kernelSpecs, setKernelSpecs] = useState<KernelSpec[]>([]);
   const [kernelName, setKernelName] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
 
   const revision = useStore((s) => s.revision);
+
+  const refreshCheckpoints = async () => {
+    try {
+      setCheckpoints(await listCheckpoints(NOTEBOOK_ID));
+    } catch {
+      /* checkpoints are best-effort */
+    }
+  };
 
   // -- initial load: kernelspecs + document, then connect -------------- #
   useEffect(() => {
@@ -49,6 +62,7 @@ export default function App() {
       socketRef.current = socket;
       socket.connect();
       setReady(true);
+      void refreshCheckpoints();
     })();
 
     return () => {
@@ -86,6 +100,25 @@ export default function App() {
     setKernelName(name);
   };
 
+  const onCreateCheckpoint = async () => {
+    try {
+      // Flush current edits so the checkpoint captures the latest state.
+      await saveDocument(NOTEBOOK_ID, useStore.getState().cells);
+      await createCheckpoint(NOTEBOOK_ID);
+      await refreshCheckpoints();
+    } catch {
+      /* best-effort */
+    }
+  };
+
+  const onRestoreCheckpoint = async (checkpointId: string) => {
+    try {
+      useStore.getState().setCells(await restoreCheckpoint(NOTEBOOK_ID, checkpointId));
+    } catch {
+      /* best-effort */
+    }
+  };
+
   if (!ready || !socketRef.current) {
     return <div className="loading">Loading…</div>;
   }
@@ -98,6 +131,9 @@ export default function App() {
         kernelName={kernelName}
         onChangeKernel={changeKernel}
         saveState={saveState}
+        checkpoints={checkpoints}
+        onCreateCheckpoint={onCreateCheckpoint}
+        onRestoreCheckpoint={onRestoreCheckpoint}
       />
       <Notebook socket={socketRef.current} />
     </>
