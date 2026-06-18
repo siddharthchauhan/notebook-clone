@@ -149,6 +149,14 @@ export class NotebookSocket {
     });
   }
 
+  deleteVariable(name: string): Promise<VariablesReplyEvent> {
+    return this.request<VariablesReplyEvent>({
+      type: "delete_variable_request",
+      request_id: crypto.randomUUID(),
+      name,
+    });
+  }
+
   close(): void {
     this.closedByUser = true;
     if (this.reconnectTimer != null) window.clearTimeout(this.reconnectTimer);

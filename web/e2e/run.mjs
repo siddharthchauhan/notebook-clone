@@ -200,6 +200,29 @@ try {
     .catch(() => false);
   check("variable explorer lists var", sawVar, "");
 
+  // 12b) inspect a variable's value (kernel inspect)
+  await page.locator(".var-inspect", { hasText: "explorer_var" }).first().click();
+  const inspected = await page
+    .locator(".var-inspect-panel")
+    .filter({ hasText: "int" })
+    .first()
+    .waitFor({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+  check("variable inspect", inspected, "");
+
+  // 12c) delete a variable from the kernel
+  await page.locator(".var-row", { hasText: "explorer_var" }).locator(".var-del").click();
+  const deleted = await page
+    .waitForFunction(
+      () => ![...document.querySelectorAll(".var-inspect")].some((el) => el.textContent === "explorer_var"),
+      null,
+      { timeout: 8000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("variable delete", deleted, "");
+
   // 13) export endpoints (.ipynb + HTML)
   const ipynbResp = await page.request.get(`${BASE}/api/contents/default/export/ipynb`);
   check(

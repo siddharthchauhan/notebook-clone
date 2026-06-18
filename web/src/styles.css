@@ -552,10 +552,77 @@ select {
 .var-repr {
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
   color: #444;
-  max-width: 160px;
+  max-width: 130px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.var-filter {
+  width: calc(100% - 20px);
+  margin: 0 10px 6px;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.var-inspect {
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  color: var(--accent);
+}
+.var-actions {
+  width: 24px;
+  text-align: right;
+}
+.var-del {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  font-size: 11px;
+}
+.var-row:hover .var-del {
+  opacity: 0.7;
+}
+.var-del:hover {
+  opacity: 1;
+}
+.var-inspect-panel {
+  margin: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fffbe6;
+}
+.var-inspect-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.var-inspect-head button {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 15px;
+  color: var(--muted);
+}
+.var-inspect-panel pre {
+  margin: 0;
+  padding: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
 }
 
 /* ------------------------------------------------------------- ai chat */

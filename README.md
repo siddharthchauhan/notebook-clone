@@ -37,9 +37,10 @@ back to the browser, **correctly correlated by cell**.
 **Phase 4 — workspace** (explorer · export · multi-notebook · chat)
 
 - **Variable explorer**: a side panel listing the kernel's user-defined globals
-  (type, size, repr), auto-refreshing after each run. Introspection is diverted
-  through the single iopub pump — it never advances the `[n]` prompt or leaks
-  output to a cell.
+  (type, size, repr), auto-refreshing after each run. **Click a variable** to
+  inspect its full value (kernel `inspect`), **filter** by name, or **delete** it
+  from the kernel. Introspection is diverted through the single iopub pump — it
+  never advances the `[n]` prompt or leaks output to a cell.
 - **Export**: download any notebook as **.ipynb** or rendered **HTML** (nbconvert).
 - **Multi-notebook browser**: list / open / create / delete notebooks from a left
   sidebar — no longer a single hardcoded notebook.
@@ -92,7 +93,7 @@ server/                FastAPI + jupyter_client backend (Python 3.12, uv)
                        api.py (status, /complete + /chat SSE)
     ws.py              /ws/{notebook_id}: attach, dispatch, detach
     main.py            app wiring, CORS, lifespan (shutdown_all)
-  tests/               46 pytest: Phase 1 criteria + persistence/interrupt/
+  tests/               48 pytest: Phase 1 criteria + persistence/interrupt/
                        restart/complete/inspect + document round-trip + WS +
                        AI (prompt/echo/status/SSE/chat) + variables + notebooks
                        + export
@@ -106,7 +107,7 @@ web/                   Vite + React + TypeScript frontend
     components/        Editor, Cell, Toolbar, AiAssist (per-cell ✨ AI),
                        VariableExplorer, AiChat, NotebookBrowser, SidePanel,
                        outputs/ (rich MIME renderers)
-  e2e/run.mjs          Playwright smoke test of the live UI (20 checks)
+  e2e/run.mjs          Playwright smoke test of the live UI (22 checks)
 ```
 
 ## Quickstart
@@ -142,19 +143,19 @@ Shift+Tab on a symbol for docs.
 ## Verification
 
 ```bash
-cd server && uv run pytest        # 46 passed (headless, real kernel)
+cd server && uv run pytest        # 48 passed (headless, real kernel)
 
 cd web && npm run build           # typecheck + production build
 # Optional headless-browser smoke test. Start the server with
 # NBCLONE_AI_PROVIDER=echo so the AI flows run keyless; the e2e expects a fresh
 # starter, so clear server/notebooks/*.ipynb first if you've used the app:
 npx playwright install chromium
-npm run e2e                       # 20 checks, drives the real UI end-to-end
+npm run e2e                       # 22 checks, drives the real UI end-to-end
 ```
 
 The e2e check exercises markdown rendering, stdout, tracebacks, inline PNG,
 add-cell, **variable persistence across cells**, restart-clears-state, the queued
-indicator, checkpoints, **AI generate/explain/chat**, the **variable explorer**,
+indicator, checkpoints, **AI generate/explain/chat**, the **variable explorer** (inspect/filter/delete),
 **.ipynb/HTML export**, and **notebook create/delete** — all in a real browser
 against the live stack.
 

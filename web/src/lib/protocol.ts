@@ -39,13 +39,20 @@ export interface VariablesRequest {
   request_id: string;
 }
 
+export interface DeleteVariableRequest {
+  type: "delete_variable_request";
+  request_id: string;
+  name: string;
+}
+
 export type ClientRequest =
   | ExecuteRequest
   | InterruptRequest
   | RestartRequest
   | CompleteRequest
   | InspectRequest
-  | VariablesRequest;
+  | VariablesRequest
+  | DeleteVariableRequest;
 
 // --------------------------------------------------------------------------
 // server → client (discriminated union on `type`)

@@ -64,6 +64,14 @@ class VariablesRequest(BaseModel):
     request_id: str
 
 
+class DeleteVariableRequest(BaseModel):
+    """Delete one global from the kernel, then re-introspect (var explorer)."""
+
+    type: Literal["delete_variable_request"] = "delete_variable_request"
+    request_id: str
+    name: str
+
+
 ClientRequest = Annotated[
     Union[
         ExecuteRequest,
@@ -72,6 +80,7 @@ ClientRequest = Annotated[
         CompleteRequest,
         InspectRequest,
         VariablesRequest,
+        DeleteVariableRequest,
     ],
     Field(discriminator="type"),
 ]

@@ -25,6 +25,7 @@ from app.kernels.session import KernelSession
 from app.models import (
     ClientRequest,
     CompleteRequest,
+    DeleteVariableRequest,
     ExecuteRequest,
     InspectRequest,
     InterruptRequest,
@@ -92,6 +93,8 @@ async def _dispatch(session: KernelSession, request: ClientRequest) -> None:
         )
     elif isinstance(request, VariablesRequest):
         session.inspect_variables(request.request_id)
+    elif isinstance(request, DeleteVariableRequest):
+        session.delete_variable(request.request_id, request.name)
     elif isinstance(request, InterruptRequest):
         await session.interrupt()
     elif isinstance(request, RestartRequest):

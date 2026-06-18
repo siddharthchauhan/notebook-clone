@@ -179,10 +179,21 @@ class KernelSession:
 
     def inspect_variables(self, request_id: str) -> str:
         """Run the introspection script; its stdout is captured by the pump."""
+        return self._run_variables(request_id, _VARIABLES_SCRIPT)
+
+    def delete_variable(self, request_id: str, name: str) -> str:
+        """Delete one global (if a valid identifier), then re-introspect."""
+        prefix = ""
+        if name.isidentifier():
+            # name is validated as an identifier, so this can't inject.
+            prefix = f"try:\n    del {name}\nexcept Exception:\n    pass\n"
+        return self._run_variables(request_id, prefix + _VARIABLES_SCRIPT)
+
+    def _run_variables(self, request_id: str, code: str) -> str:
         if self.kc is None:
             raise RuntimeError("kernel session not started")
         msg_id = self.kc.execute(
-            _VARIABLES_SCRIPT, silent=False, store_history=False, allow_stdin=False
+            code, silent=False, store_history=False, allow_stdin=False
         )
         self.var_requests[msg_id] = request_id
         self.var_buffers[msg_id] = ""
