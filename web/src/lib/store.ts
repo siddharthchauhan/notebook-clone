@@ -27,15 +27,17 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
-export function emptyCell(cell_type: CellType = "code"): CellState {
+export function emptyCell(cell_type: CellType = "code", source = ""): CellState {
   return {
     id: newId(),
     cell_type,
-    source: "",
+    source,
     outputs: [],
     execution_state: "idle",
     execution_count: null,
-    rendered: false, // new cells (incl. markdown) open in edit mode
+    // New cells open in edit mode; a markdown cell seeded with content (e.g.
+    // from AI) opens rendered so it reads as finished, not a draft.
+    rendered: cell_type === "markdown" && source.length > 0,
   };
 }
 
@@ -44,14 +46,16 @@ interface NotebookStore {
   connected: boolean;
   kernelStatus: KernelStatus;
   kernelName: string | null;
+  aiAvailable: boolean; // whether the server has AI assist configured
   revision: number; // bumps on persistable changes; drives autosave
 
   setConnected: (connected: boolean) => void;
   setKernel: (status: KernelStatus, name?: string | null) => void;
+  setAiAvailable: (available: boolean) => void;
   setCells: (cells: CellState[]) => void;
 
   setSource: (cellId: string, source: string) => void;
-  addCell: (afterId: string | null, cell_type: CellType) => string;
+  addCell: (afterId: string | null, cell_type: CellType, source?: string) => string;
   deleteCell: (cellId: string) => void;
   moveCell: (cellId: string, dir: -1 | 1) => void;
   setCellType: (cellId: string, cell_type: CellType) => void;
@@ -75,11 +79,13 @@ export const useStore = create<NotebookStore>((set, get) => ({
   connected: false,
   kernelStatus: "connecting",
   kernelName: null,
+  aiAvailable: false,
   revision: 0,
 
   setConnected: (connected) => set({ connected }),
   setKernel: (kernelStatus, name) =>
     set((s) => ({ kernelStatus, kernelName: name ?? s.kernelName })),
+  setAiAvailable: (aiAvailable) => set({ aiAvailable }),
   setCells: (cells) => set({ cells }),
 
   setSource: (cellId, source) =>
@@ -88,8 +94,8 @@ export const useStore = create<NotebookStore>((set, get) => ({
       revision: s.revision + 1,
     })),
 
-  addCell: (afterId, cell_type) => {
-    const cell = emptyCell(cell_type);
+  addCell: (afterId, cell_type, source = "") => {
+    const cell = emptyCell(cell_type, source);
     set((s) => {
       const idx = afterId ? s.cells.findIndex((c) => c.id === afterId) : -1;
       const at = idx === -1 ? s.cells.length : idx + 1;

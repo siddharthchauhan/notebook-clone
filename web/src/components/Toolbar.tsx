@@ -25,6 +25,7 @@ export function Toolbar({
 }: ToolbarProps) {
   const connected = useStore((s) => s.connected);
   const kernelStatus = useStore((s) => s.kernelStatus);
+  const aiAvailable = useStore((s) => s.aiAvailable);
 
   const runAll = () => {
     const state = useStore.getState();
@@ -101,6 +102,12 @@ export function Toolbar({
           ))}
         </select>
       </label>
+
+      {aiAvailable && (
+        <span className="ai-chip" title="AI assist is enabled">
+          ✨ AI
+        </span>
+      )}
 
       <span className={`save-state ${saveState}`}>
         {saveState === "saving" ? "saving…" : saveState === "dirty" ? "unsaved" : "saved"}

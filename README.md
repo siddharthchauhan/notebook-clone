@@ -24,6 +24,16 @@ back to the browser, **correctly correlated by cell**.
 - **Autocomplete** (kernel `complete`) and **inspect** (Shift+Tab → docs).
 - **Kernel picker**, **autosave** to `.ipynb`, and **reconnect** with backoff.
 
+**Phase 3 — AI assist** (Claude, streamed)
+
+- Per-cell **✨ AI**: **Generate** code from a prompt, **Fix** a cell from its
+  traceback, or **Explain** a cell — answers stream token-by-token over SSE.
+- Generate/Fix land their result as a **new cell below** (never overwrites your
+  code); Explain renders Markdown in an inline panel.
+- Powered by the Anthropic API (`claude-opus-4-8`). **Degrades gracefully**: with
+  no key configured the server reports unavailable and the UI hides all AI
+  controls. A keyless `echo` provider drives the tests and e2e.
+
 ## Architecture
 
 ```
@@ -36,7 +46,8 @@ browser (Vite :5173)                      server (uvicorn :8000)
 │ zustand store (per-cell   │  status/out  │   broadcast → N attached sockets   │
 │   outputs, append-only)   │  /reply/...  │   msg_to_cell correlation          │
 │ rich renderers + markdown │              │ REST: /api/contents (autosave),    │
-│ autosave (debounced PUT)  │  HTTP        │       /api/kernelspecs              │
+│ autosave (debounced PUT)  │  HTTP        │       /api/kernelspecs, /api/ai     │
+│ per-cell AI (SSE stream)  │  SSE         │   /api/ai/complete → Claude (stream)│
 └──────────────────────────┘              └───────────────────────────────────┘
 ```
 
@@ -60,18 +71,22 @@ server/                FastAPI + jupyter_client backend (Python 3.12, uv)
       translate.py     iopub message → client event (pure)
       api.py           GET /api/kernelspecs, DELETE /api/kernels/{id}
     contents/          nbformat <-> client "document" mapping; autosave API
+    ai/                AI assist: service.py (prompt + pluggable provider),
+                       api.py (GET /api/ai/status, POST /api/ai/complete SSE)
     ws.py              /ws/{notebook_id}: attach, dispatch, detach
     main.py            app wiring, CORS, lifespan (shutdown_all)
-  tests/               22 pytest: Phase 1 criteria + persistence/interrupt/
-                       restart/complete/inspect + document round-trip + WS
+  tests/               38 pytest: Phase 1 criteria + persistence/interrupt/
+                       restart/complete/inspect + document round-trip + WS +
+                       AI prompt/echo-stream/status/SSE
 web/                   Vite + React + TypeScript frontend
   src/
     lib/protocol.ts    TS mirror of models.py
     lib/store.ts       zustand: multi-cell, append-only streams, autosave rev
     lib/ws.ts          WS client: reconnect + request/reply (complete/inspect)
     lib/document.ts    cell model <-> server document; contents/kernelspecs API
+    lib/ai.ts          AI status + SSE-over-fetch streamer
     components/        Editor (CM6 + autocomplete/inspect), Cell, Toolbar,
-                       outputs/ (rich MIME renderers)
+                       AiAssist (per-cell ✨ AI), outputs/ (rich MIME renderers)
   e2e/run.mjs          Playwright smoke test of the live UI
 ```
 
@@ -99,22 +114,31 @@ Shift+Tab on a symbol for docs.
 > issue seen on 3.14 (jupyter/jupyter_client#1079). The matplotlib snippet uses
 > `%matplotlib inline` so a fresh kernel emits `image/png`.
 
+> **AI assist (optional).** Set `ANTHROPIC_API_KEY` (or `NBCLONE_ANTHROPIC_API_KEY`)
+> in the server's environment to enable the per-cell **✨ AI** features; without
+> a key the controls stay hidden. Override the model with `NBCLONE_AI_MODEL`
+> (default `claude-opus-4-8`). `NBCLONE_AI_PROVIDER=echo` selects a keyless,
+> deterministic stub used by the tests and e2e.
+
 ## Verification
 
 ```bash
-cd server && uv run pytest        # 22 passed (headless, real kernel)
+cd server && uv run pytest        # 38 passed (headless, real kernel)
 
 cd web && npm run build           # typecheck + production build
-# Optional headless-browser smoke test (servers must be running):
+# Optional headless-browser smoke test (servers must be running). Start the
+# server with NBCLONE_AI_PROVIDER=echo to also exercise the AI flow:
 npx playwright install chromium
 npm run e2e                       # drives the real UI end-to-end
 ```
 
 The e2e check exercises markdown rendering, stdout, tracebacks, inline PNG,
-add-cell, **variable persistence across cells**, restart-clears-state, and
-markdown rendering — all in a real browser against the live stack.
+add-cell, **variable persistence across cells**, restart-clears-state, markdown
+rendering, the queued indicator, checkpoints, and — when AI is configured —
+**AI generate** (streams a new cell) and **AI explain** — all in a real browser
+against the live stack.
 
 ## Out of scope (future)
 
 Real-time collaboration, a variable explorer/debugger, `ipywidgets`, notebook
-export (nbconvert), a multi-notebook file browser, auth, and AI/connectors.
+export (nbconvert), a multi-notebook file browser, auth, and data connectors.

@@ -147,6 +147,46 @@ try {
     .catch(() => false);
   check("checkpoint created", checkpointOk, "");
 
+  // 11) AI assist (Phase 3). Exercised when the server has a provider
+  //     configured — the e2e run sets NBCLONE_AI_PROVIDER=echo. When AI is off,
+  //     the per-cell controls must be hidden entirely.
+  const aiAvailable = await page.evaluate(() => window.__store.getState().aiAvailable);
+  if (aiAvailable) {
+    const before = await cellCount();
+    const firstCode = page.locator(".cell.code").first();
+    await firstCode.locator(".ai-toggle").click();
+    await firstCode.locator(".ai-input").fill("say hi");
+    await firstCode.locator(".ai-generate").click();
+    const inserted = await page
+      .waitForFunction(
+        (n) => {
+          const cells = window.__store.getState().cells;
+          return cells.length === n + 1 && cells.some((c) => c.source.includes("hello from ai"));
+        },
+        before,
+        { timeout: 10000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    check("ai generate inserts a cell", inserted, "");
+
+    // Explain streams Markdown into a preview panel (non-destructive).
+    const explainCell = page.locator(".cell.code").first();
+    await explainCell.locator(".ai-toggle").click();
+    await explainCell.locator(".ai-explain").click();
+    const explained = await explainCell
+      .locator(".ai-preview.text")
+      .filter({ hasText: "None" })
+      .first()
+      .waitFor({ timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+    check("ai explain panel", explained, "");
+  } else {
+    const toggles = await page.locator(".ai-toggle").count();
+    check("ai controls hidden when unavailable", toggles === 0, `toggles=${toggles}`);
+  }
+
   check("no console errors", consoleErrors.length === 0, consoleErrors.slice(0, 3).join(" | "));
 } catch (e) {
   check("script completed", false, String(e).split("\n")[0]);

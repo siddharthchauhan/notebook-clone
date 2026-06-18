@@ -30,5 +30,19 @@ class Settings(BaseSettings):
     # How long to wait for a freshly started kernel to report ready.
     kernel_startup_timeout: float = 30.0
 
+    # -- AI assist (Phase 3) -------------------------------------------- #
+    # The real provider needs an Anthropic API key. Either set
+    # ``NBCLONE_ANTHROPIC_API_KEY`` here or the SDK-standard ``ANTHROPIC_API_KEY``
+    # in the environment; when neither is present the AI endpoints report
+    # ``available: false`` and return 503 so the UI hides its AI controls.
+    anthropic_api_key: str | None = None
+    ai_model: str = "claude-opus-4-8"
+    ai_max_tokens: int = 2048
+
+    # Provider selection: "auto" uses Anthropic when a key is available,
+    # otherwise unavailable. "echo" forces a deterministic local stub with no
+    # network or key — used by the test suite and the headless e2e run.
+    ai_provider: str = "auto"
+
 
 settings = Settings()
