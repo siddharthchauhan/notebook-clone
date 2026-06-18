@@ -1,63 +1,63 @@
-"""Shared test harness: a real kernel plus an iopub event collector.
+"""Shared test harness: a real persistent kernel plus an event collector.
 
-These tests drive an actual :class:`KernelSession` headless (no FastAPI, no
-browser) and assert on the translated client events, exactly mirroring what the
-WS layer would send to the browser.
+These tests drive an actual :class:`KernelSession` headless and assert on the
+broadcast event dicts — exactly what the WS layer forwards to the browser.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 
 import pytest_asyncio
 
 from app.kernels.session import KernelSession
-from app.kernels.translate import to_client_event
-from app.models import ClientEvent
 
 
 class EventCollector:
-    """Pump callback that records translated events and tracks idle status.
-
-    Mirrors the WS layer's ``on_event`` but stores events instead of sending
-    them, and lets a test ``await`` a specific cell reaching ``idle``.
-    """
+    """A session subscriber that records every broadcast event dict."""
 
     def __init__(self) -> None:
-        self.events: list[ClientEvent] = []
-        self._idle: dict[str | None, asyncio.Event] = {}
+        self.events: list[dict] = []
 
-    async def on_event(self, cell_id: str | None, msg_type: str, content: dict) -> None:
-        event = to_client_event(cell_id, msg_type, content)
-        if event is not None:
-            self.events.append(event)
-        if msg_type == "status" and content.get("execution_state") == "idle":
-            self._idle.setdefault(cell_id, asyncio.Event()).set()
+    async def handle(self, event: dict) -> None:
+        self.events.append(event)
 
-    async def wait_idle(self, cell_id: str, timeout: float = 30.0) -> None:
-        """Block until ``cell_id`` has reported ``idle`` (its run finished)."""
-        flag = self._idle.setdefault(cell_id, asyncio.Event())
-        await asyncio.wait_for(flag.wait(), timeout)
+    # -- queries ----------------------------------------------------- #
+    def for_cell(self, cell_id: str) -> list[dict]:
+        return [e for e in self.events if e.get("cell_id") == cell_id]
 
-    def for_cell(self, cell_id: str) -> list[ClientEvent]:
-        return [e for e in self.events if e.cell_id == cell_id]
+    def of_type(self, cell_id: str, type_name: str) -> list[dict]:
+        return [e for e in self.for_cell(cell_id) if e.get("type") == type_name]
 
-    def of_type(self, cell_id: str, type_name: str) -> list[ClientEvent]:
-        return [e for e in self.for_cell(cell_id) if e.type == type_name]
+    # -- waiting ----------------------------------------------------- #
+    async def wait_event(self, predicate, timeout: float = 30.0) -> dict:
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        while True:
+            for e in self.events:
+                if predicate(e):
+                    return e
+            if loop.time() > deadline:
+                raise asyncio.TimeoutError("event not seen within timeout")
+            await asyncio.sleep(0.02)
+
+    async def wait_idle(self, cell_id: str, timeout: float = 30.0) -> dict:
+        return await self.wait_event(
+            lambda e: e.get("type") == "status"
+            and e.get("cell_id") == cell_id
+            and e.get("execution_state") == "idle",
+            timeout,
+        )
 
 
 @pytest_asyncio.fixture
 async def kernel():
-    """A started kernel with a single iopub pump feeding an EventCollector."""
+    """A started persistent kernel with one subscribed EventCollector."""
     session = KernelSession()
     await session.start()
     collector = EventCollector()
-    pump = asyncio.create_task(session.pump_iopub(collector.on_event))
+    session.subscribe(collector.handle)
     try:
         yield session, collector
     finally:
-        pump.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await pump
         await session.shutdown()

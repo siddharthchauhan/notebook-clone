@@ -1,20 +1,20 @@
-"""Wire protocol between the browser and the server (spec §4.3).
+"""Wire protocol between the browser and the server.
 
-There are two directions:
+Two directions, each a discriminated union tagged by ``type``:
 
-* **client → server**: :class:`ExecuteRequest` (the only inbound message in
-  Phase 1).
-* **server → client**: a discriminated union of events
-  (:data:`ClientEvent`) tagged by the ``type`` field.
+* **client → server** (:data:`ClientRequest`): execute, interrupt, restart, and
+  the request/reply pairs complete + inspect.
+* **server → client** (:data:`ClientEvent`): kernel/cell status, outputs
+  (stream/display/error), exec-input prompts, clear-output, and the
+  complete/inspect replies.
 
-Every server→client event carries a ``cell_id`` so the browser can route the
-output to the correct cell. It is ``str | None`` on purpose: kernel-initiated
-messages (for example the kernel's own ``starting``/``idle`` status at boot)
-have no originating cell, so their ``parent_header.msg_id`` resolves to
-``None``. The frontend simply ignores ``None`` when fanning out to cells.
+Every cell-scoped event carries ``cell_id`` so the browser can route output to
+the right cell; it is ``str | None`` because kernel-initiated messages have no
+owning cell. The complete/inspect replies instead carry a globally-unique
+``request_id`` (a client-generated UUID) so a reply can be broadcast to all
+attached sockets and matched only by the originating client.
 
-The TypeScript mirror of these types lives in ``web/src/lib/protocol.ts`` and
-must be kept in sync by hand.
+The TypeScript mirror lives in ``web/src/lib/protocol.ts``; keep them in sync.
 """
 
 from __future__ import annotations
@@ -29,17 +29,42 @@ from pydantic import BaseModel, Field
 
 
 class ExecuteRequest(BaseModel):
-    """Run ``code`` for the cell identified by ``cell_id``."""
-
     type: Literal["execute_request"] = "execute_request"
     cell_id: str
     code: str
 
 
-# Inbound is a one-member union today, but modelling it as a union keeps the
-# WS dispatch logic uniform when interrupt/restart requests arrive in Phase 2.
+class InterruptRequest(BaseModel):
+    type: Literal["interrupt_request"] = "interrupt_request"
+
+
+class RestartRequest(BaseModel):
+    type: Literal["restart_request"] = "restart_request"
+
+
+class CompleteRequest(BaseModel):
+    type: Literal["complete_request"] = "complete_request"
+    request_id: str
+    code: str
+    cursor_pos: int
+
+
+class InspectRequest(BaseModel):
+    type: Literal["inspect_request"] = "inspect_request"
+    request_id: str
+    code: str
+    cursor_pos: int
+    detail_level: int = 0
+
+
 ClientRequest = Annotated[
-    Union[ExecuteRequest],
+    Union[
+        ExecuteRequest,
+        InterruptRequest,
+        RestartRequest,
+        CompleteRequest,
+        InspectRequest,
+    ],
     Field(discriminator="type"),
 ]
 
@@ -50,47 +75,41 @@ ClientRequest = Annotated[
 
 
 class StatusEvent(BaseModel):
-    """Kernel execution state for a cell: ``busy``/``idle`` (or ``starting``).
-
-    Drives the per-cell busy spinner. ``busy`` → show spinner, ``idle`` →
-    clear it.
-    """
+    """Per-cell execution state: ``busy``/``idle`` (drives the cell spinner)."""
 
     type: Literal["status"] = "status"
     cell_id: str | None
     execution_state: str  # "starting" | "busy" | "idle"
 
 
-class StreamEvent(BaseModel):
-    """A chunk of ``stdout``/``stderr`` text.
+class ExecInputEvent(BaseModel):
+    """The kernel accepted a cell for execution; carries its ``[n]`` prompt."""
 
-    Critically *append-only*: the frontend concatenates ``text`` onto the
-    cell's existing stream buffer, never replaces it.
-    """
+    type: Literal["exec_input"] = "exec_input"
+    cell_id: str | None
+    execution_count: int | None = None
+
+
+class StreamEvent(BaseModel):
+    """Append-only chunk of ``stdout``/``stderr`` text."""
 
     type: Literal["stream"] = "stream"
     cell_id: str | None
-    name: str  # "stdout" | "stderr"
+    name: str
     text: str
 
 
 class DisplayEvent(BaseModel):
-    """A rich MIME bundle from ``execute_result`` or ``display_data``.
-
-    ``data`` maps MIME type → payload, e.g. ``{"text/plain": "...",
-    "image/png": "<base64>"}``. Phase 1 renderers consume ``text/plain`` and
-    ``image/png``.
-    """
+    """A rich MIME bundle from ``execute_result`` or ``display_data``."""
 
     type: Literal["display"] = "display"
     cell_id: str | None
     data: dict[str, Any]
     metadata: dict[str, Any] = Field(default_factory=dict)
+    execution_count: int | None = None
 
 
 class ErrorEvent(BaseModel):
-    """An exception raised during execution (kernel ``error`` message)."""
-
     type: Literal["error"] = "error"
     cell_id: str | None
     ename: str
@@ -98,7 +117,51 @@ class ErrorEvent(BaseModel):
     traceback: list[str]
 
 
+class ClearOutputEvent(BaseModel):
+    """Kernel asked to clear a cell's output (``wait`` defers until next write)."""
+
+    type: Literal["clear_output"] = "clear_output"
+    cell_id: str | None
+    wait: bool = False
+
+
+class KernelStatusEvent(BaseModel):
+    """Kernel lifecycle, distinct from per-cell execution state.
+
+    ``state`` is one of ``ready`` | ``restarting`` | ``dead``.
+    """
+
+    type: Literal["kernel_status"] = "kernel_status"
+    state: str
+    kernel_name: str | None = None
+
+
+class CompleteReplyEvent(BaseModel):
+    type: Literal["complete_reply"] = "complete_reply"
+    request_id: str
+    matches: list[str]
+    cursor_start: int
+    cursor_end: int
+
+
+class InspectReplyEvent(BaseModel):
+    type: Literal["inspect_reply"] = "inspect_reply"
+    request_id: str
+    found: bool
+    data: dict[str, Any]
+
+
 ClientEvent = Annotated[
-    Union[StatusEvent, StreamEvent, DisplayEvent, ErrorEvent],
+    Union[
+        StatusEvent,
+        ExecInputEvent,
+        StreamEvent,
+        DisplayEvent,
+        ErrorEvent,
+        ClearOutputEvent,
+        KernelStatusEvent,
+        CompleteReplyEvent,
+        InspectReplyEvent,
+    ],
     Field(discriminator="type"),
 ]
