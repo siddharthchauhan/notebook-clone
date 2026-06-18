@@ -1,147 +1,120 @@
-# Notebook Clone — Phase 1 vertical slice
+# Notebook Clone
 
-A minimal Jupyter-style notebook that proves the hard part end-to-end:
+A Jupyter-style notebook built on the same spine throughout: CodeMirror cells →
+FastAPI over WebSocket → a real `jupyter_client` kernel → live outputs streamed
+back to the browser, **correctly correlated by cell**.
 
-> one CodeMirror cell → FastAPI → a real `jupyter_client` kernel → live outputs
-> streamed back to the browser, **correctly correlated by cell**.
+## Features
 
-Everything else (multiple cells, markdown, autosave, interrupt/restart UI,
-full MIME set, AI features) is incremental once this spine works, and is
-deferred to later phases.
+**Phase 1 — the spine**
 
-## What works
+- Run a code cell; `stdout` streams into its output.
+- matplotlib renders inline PNGs; tracebacks render without crashing the server.
+- A busy spinner shows while a cell runs and clears on idle.
 
-All four acceptance criteria pass (see [Verification](#verification)):
+**Phase 2 — a usable notebook**
 
-1. `print("hi")` streams `hi` into the cell's output.
-2. A matplotlib snippet renders a PNG inline.
-3. `1/0` renders a traceback — the server does **not** crash.
-4. A `time.sleep(3)` cell shows a busy spinner that clears on idle.
+- **Multi-cell editing**: add / delete / move cells, code **and** markdown
+  cells, per-cell run, and run-all.
+- **Markdown cells**: rendered (sanitized) with double-click to edit.
+- **Persistent per-notebook kernels**: kernel state survives reloads/reconnects;
+  **interrupt** and **restart** from the toolbar.
+- **Rich outputs**: `text/plain`, `image/png` · `image/jpeg`, `text/html`
+  (sanitized), `image/svg+xml`, `text/latex` (KaTeX), `application/json`.
+- **Autocomplete** (kernel `complete`) and **inspect** (Shift+Tab → docs).
+- **Kernel picker**, **autosave** to `.ipynb`, and **reconnect** with backoff.
 
 ## Architecture
 
 ```
 browser (Vite :5173)                      server (uvicorn :8000)
 ┌──────────────────────────┐              ┌───────────────────────────────────┐
-│ CodeMirror 6 editor       │  WS /ws/{id} │ FastAPI WebSocket                  │
-│   └ execute_request ──────┼─────────────▶│   └ KernelSession.execute()        │
-│                           │              │        └ jupyter_client kernel      │
-│ zustand store             │◀─────────────┼── single iopub pump → translate    │
-│   └ outputs keyed by cell │  status/     │        └ to_client_event()          │
-│ output renderers          │  stream/     │                                     │
-│   text · image/png · err  │  display/err │ GET/PUT /api/contents/{id} (nbformat)│
+│ CodeMirror cells          │  WS /ws/{id} │ FastAPI WebSocket (attach/detach)  │
+│   execute / complete /    │─────────────▶│   → per-notebook KernelSession     │
+│   inspect / interrupt /   │              │       (persistent, in a registry)  │
+│   restart                 │◀─────────────┤   one iopub pump + one shell pump  │
+│ zustand store (per-cell   │  status/out  │   broadcast → N attached sockets   │
+│   outputs, append-only)   │  /reply/...  │   msg_to_cell correlation          │
+│ rich renderers + markdown │              │ REST: /api/contents (autosave),    │
+│ autosave (debounced PUT)  │  HTTP        │       /api/kernelspecs              │
 └──────────────────────────┘              └───────────────────────────────────┘
 ```
 
-**The crux.** A kernel knows nothing about "cells". Every output message it
-publishes carries a `parent_header.msg_id` pointing back to the
-`execute_request` that caused it. Correlating outputs to cells is therefore
-*entirely* a matter of remembering, at submit time, which cell owns which
-`msg_id` — that mapping is `KernelSession.msg_to_cell`. There is exactly **one**
-long-lived task draining the iopub channel; multiple concurrent readers would
-race and silently drop messages. This single-pump + one-dict design is the
-whole correctness mechanism, and it is tested explicitly
-(`test_outputs_correlate_to_their_own_cell`).
+**The crux (unchanged since Phase 1).** A kernel knows nothing about "cells".
+Every output carries a `parent_header.msg_id` pointing back to the
+`execute_request` that caused it, so correlation is just remembering, at submit
+time, which cell owns which `msg_id` (`KernelSession.msg_to_cell`). There is
+exactly **one** reader per channel (one iopub pump, one shell pump) fanning out
+to N sockets; multiple readers would race and drop messages. Restart pauses the
+pumps so `wait_for_ready` is the sole reader, then resumes — no race.
 
 ## Layout
 
 ```
 server/                FastAPI + jupyter_client backend (Python 3.12, uv)
   app/
-    config.py          settings (host/port, CORS, kernel name)
-    models.py          Pydantic wire protocol (client↔server)
+    models.py          Pydantic wire protocol (execute/complete/inspect/…)
     kernels/
-      session.py       KernelSession — lifecycle, execute, the iopub pump
-      translate.py     raw iopub message → client event (pure function)
-    contents/
-      store.py         nbformat load/save of the starter notebook
-      api.py           GET/PUT /api/contents/{id}
-    ws.py              /ws/{notebook_id} WebSocket endpoint
-    main.py            app wiring + CORS
-  tests/               headless pytest (real kernel) + WS integration test
+      session.py       persistent KernelSession: iopub+shell pumps, broadcast
+      manager.py       KernelRegistry: one session per notebook_id
+      translate.py     iopub message → client event (pure)
+      api.py           GET /api/kernelspecs, DELETE /api/kernels/{id}
+    contents/          nbformat <-> client "document" mapping; autosave API
+    ws.py              /ws/{notebook_id}: attach, dispatch, detach
+    main.py            app wiring, CORS, lifespan (shutdown_all)
+  tests/               22 pytest: Phase 1 criteria + persistence/interrupt/
+                       restart/complete/inspect + document round-trip + WS
 web/                   Vite + React + TypeScript frontend
   src/
-    lib/protocol.ts    TS mirror of models.py (discriminated union)
-    lib/ws.ts          WebSocket client
-    lib/store.ts       zustand store (append-only stream buffers)
-    components/        Editor (CodeMirror), Cell (spinner + outputs), renderers
-    App.tsx            loads the starter notebook, wires the socket
+    lib/protocol.ts    TS mirror of models.py
+    lib/store.ts       zustand: multi-cell, append-only streams, autosave rev
+    lib/ws.ts          WS client: reconnect + request/reply (complete/inspect)
+    lib/document.ts    cell model <-> server document; contents/kernelspecs API
+    components/        Editor (CM6 + autocomplete/inspect), Cell, Toolbar,
+                       outputs/ (rich MIME renderers)
+  e2e/run.mjs          Playwright smoke test of the live UI
 ```
 
 ## Quickstart
 
-Prerequisites: **Python 3.12**, [uv](https://docs.astral.sh/uv/), and **Node 18+**.
-
-> Python 3.12 is pinned to avoid the `jupyter_client` "no running event loop"
-> issue observed on 3.14 (jupyter/jupyter_client#1079).
-
-### 1. Server (terminal A)
+Prerequisites: **Python 3.12**, [uv](https://docs.astral.sh/uv/), **Node 18+**.
 
 ```bash
-cd server
-uv sync --extra dev          # create venv + install deps
+# terminal A — server
+cd server && uv sync --extra dev
 uv run uvicorn app.main:app --reload --port 8000
+
+# terminal B — frontend
+cd web && npm install
+npm run dev          # http://localhost:5173
 ```
 
-### 2. Frontend (terminal B)
+Open http://localhost:5173. The starter notebook has a markdown title and a
+`print("hi")` code cell. Edit and press **Shift+Enter** (or **▶ Run**). Use the
+toolbar to run-all, interrupt, restart, add cells, or switch kernels. Try
+`%matplotlib inline` plots, a pandas DataFrame (`text/html`), `1/0`, or
+Shift+Tab on a symbol for docs.
 
-```bash
-cd web
-npm install
-npm run dev                  # http://localhost:5173
-```
-
-Open http://localhost:5173. The starter notebook loads a single
-`print("hi")` cell. Edit it and press **Shift+Enter** (or click **▶ Run**).
-
-The Vite dev server proxies `/api` and `/ws` to the FastAPI server on `:8000`,
-so the browser only ever talks to `:5173` (no CORS friction in dev).
-
-### Try the acceptance scenarios in the browser
-
-```python
-# 1. stdout
-print("hi")
-
-# 2. inline PNG  (the %matplotlib inline magic activates the inline backend)
-%matplotlib inline
-import matplotlib.pyplot as plt
-fig, ax = plt.subplots()
-ax.plot([1, 2, 3], [1, 4, 9])
-
-# 3. traceback (server stays alive)
-1 / 0
-
-# 4. busy spinner that clears on idle
-import time; time.sleep(3)
-```
-
-> **matplotlib note:** a fresh kernel only emits `image/png` once the inline
-> backend is active, so the snippet starts with `%matplotlib inline`.
-> Auto-configuring the backend kernel-side is a Phase 2 polish.
+> Python 3.12 is pinned to avoid the jupyter_client "no running event loop"
+> issue seen on 3.14 (jupyter/jupyter_client#1079). The matplotlib snippet uses
+> `%matplotlib inline` so a fresh kernel emits `image/png`.
 
 ## Verification
 
-The server spine is proven headless (no browser needed):
-
 ```bash
-cd server
-uv run pytest          # 12 passed
+cd server && uv run pytest        # 22 passed (headless, real kernel)
+
+cd web && npm run build           # typecheck + production build
+# Optional headless-browser smoke test (servers must be running):
+npx playwright install chromium
+npm run e2e                       # drives the real UI end-to-end
 ```
 
-| Acceptance criterion        | Test                                            |
-| --------------------------- | ----------------------------------------------- |
-| #1 stdout streaming         | `test_stdout_streams_to_cell`                   |
-| #2 matplotlib inline PNG    | `test_matplotlib_renders_png`                   |
-| #3 traceback, no crash      | `test_zero_division_traceback_keeps_kernel_alive` |
-| #4 busy → idle status       | `test_busy_then_idle_status`                    |
-| per-cell correlation guard  | `test_outputs_correlate_to_their_own_cell`      |
-| WS endpoint round-trip      | `test_ws.py` (Starlette TestClient)             |
+The e2e check exercises markdown rendering, stdout, tracebacks, inline PNG,
+add-cell, **variable persistence across cells**, restart-clears-state, and
+markdown rendering — all in a real browser against the live stack.
 
-The frontend typechecks and builds with `cd web && npm run build`.
+## Out of scope (future)
 
-## Out of scope for Phase 1
-
-Cell add/delete/move, markdown cells, the full MIME set (html/svg/latex/json),
-autosave/checkpoints, interrupt/restart UI, an execution queue,
-autocomplete/inspect, kernel picker, and AI/connectors — all Phase 2+.
+Real-time collaboration, a variable explorer/debugger, `ipywidgets`, notebook
+export (nbconvert), a multi-notebook file browser, auth, and AI/connectors.

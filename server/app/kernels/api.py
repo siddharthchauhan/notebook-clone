@@ -13,6 +13,7 @@ from fastapi import APIRouter
 from jupyter_client.kernelspec import KernelSpecManager
 
 from app.config import settings
+from app.kernels.manager import registry
 
 router = APIRouter(prefix="/api", tags=["kernels"])
 
@@ -30,3 +31,10 @@ def list_kernelspecs() -> dict[str, Any]:
         for name, info in sorted(specs.items())
     ]
     return {"default": settings.default_kernel_name, "kernelspecs": kernels}
+
+
+@router.delete("/kernels/{notebook_id}")
+async def shutdown_kernel(notebook_id: str) -> dict[str, bool]:
+    """Drop a notebook's kernel session (used when switching kernels)."""
+    await registry.shutdown(notebook_id)
+    return {"ok": True}

@@ -1,37 +1,59 @@
-import type { ClientEvent, ExecuteRequest } from "./protocol";
+import type {
+  ClientEvent,
+  ClientRequest,
+  CompleteReplyEvent,
+  InspectReplyEvent,
+} from "./protocol";
 import { useStore } from "./store";
 
-// WebSocket client for one notebook. Incoming events are dispatched straight
-// into the zustand store; outgoing execute requests are sent as JSON.
-//
-// Phase 1 reconnect is a stub: on an unexpected close we retry with a fixed
-// backoff. Full reconnect (resubscribe, replay, jitter) is Phase 2.
+type ReplyEvent = CompleteReplyEvent | InspectReplyEvent;
+
+// WebSocket client for one notebook. Output/status events are dispatched into
+// the store; complete/inspect replies resolve the matching pending promise by
+// request_id. Reconnect uses exponential backoff with jitter; the server keeps
+// the kernel alive across the gap, so a reconnect just re-attaches.
 export class NotebookSocket {
   private ws: WebSocket | null = null;
-  private notebookId: string;
+  private readonly notebookId: string;
+  private readonly kernelName: string | null;
   private closedByUser = false;
+  private reconnectAttempts = 0;
   private reconnectTimer: number | null = null;
+  private readonly pending = new Map<string, (event: ReplyEvent) => void>();
 
-  constructor(notebookId: string) {
+  constructor(notebookId: string, kernelName: string | null = null) {
     this.notebookId = notebookId;
+    this.kernelName = kernelName;
   }
 
   connect(): void {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    // Relative to the current origin so Vite's dev proxy forwards to :8000.
-    const url = `${proto}://${location.host}/ws/${this.notebookId}`;
-    const ws = new WebSocket(url);
+    const q = this.kernelName ? `?kernel=${encodeURIComponent(this.kernelName)}` : "";
+    const ws = new WebSocket(`${proto}://${location.host}/ws/${this.notebookId}${q}`);
     this.ws = ws;
 
-    ws.onopen = () => useStore.getState().setConnected(true);
+    ws.onopen = () => {
+      this.reconnectAttempts = 0;
+      useStore.getState().setConnected(true);
+    };
 
     ws.onmessage = (ev) => {
+      let event: ClientEvent;
       try {
-        const event = JSON.parse(ev.data) as ClientEvent;
-        useStore.getState().applyEvent(event);
+        event = JSON.parse(ev.data) as ClientEvent;
       } catch (err) {
         console.error("failed to parse server event", err, ev.data);
+        return;
       }
+      if (event.type === "complete_reply" || event.type === "inspect_reply") {
+        const resolve = this.pending.get(event.request_id);
+        if (resolve) {
+          this.pending.delete(event.request_id);
+          resolve(event);
+        }
+        return;
+      }
+      useStore.getState().applyEvent(event);
     };
 
     ws.onclose = () => {
@@ -44,23 +66,75 @@ export class NotebookSocket {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer != null) return;
+    // Exponential backoff capped at 10s, with jitter to avoid thundering herd.
+    const base = Math.min(1000 * 2 ** this.reconnectAttempts, 10000);
+    const delay = base / 2 + Math.random() * (base / 2);
+    this.reconnectAttempts += 1;
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, 1000);
+    }, delay);
+  }
+
+  private send(req: ClientRequest): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      console.warn("cannot send: socket not open", req.type);
+      return false;
+    }
+    this.ws.send(JSON.stringify(req));
+    return true;
   }
 
   execute(cellId: string, code: string): void {
-    if (this.ws?.readyState !== WebSocket.OPEN) {
-      console.warn("cannot execute: socket not open");
-      return;
-    }
-    const req: ExecuteRequest = {
-      type: "execute_request",
-      cell_id: cellId,
+    this.send({ type: "execute_request", cell_id: cellId, code });
+  }
+
+  interrupt(): void {
+    this.send({ type: "interrupt_request" });
+  }
+
+  restart(): void {
+    this.send({ type: "restart_request" });
+  }
+
+  private request<T extends ReplyEvent>(
+    req: ClientRequest & { request_id: string },
+    timeoutMs = 5000,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        this.pending.delete(req.request_id);
+        reject(new Error("request timed out"));
+      }, timeoutMs);
+      this.pending.set(req.request_id, (event) => {
+        window.clearTimeout(timer);
+        resolve(event as T);
+      });
+      if (!this.send(req)) {
+        window.clearTimeout(timer);
+        this.pending.delete(req.request_id);
+        reject(new Error("socket not open"));
+      }
+    });
+  }
+
+  complete(code: string, cursorPos: number): Promise<CompleteReplyEvent> {
+    return this.request<CompleteReplyEvent>({
+      type: "complete_request",
+      request_id: crypto.randomUUID(),
       code,
-    };
-    this.ws.send(JSON.stringify(req));
+      cursor_pos: cursorPos,
+    });
+  }
+
+  inspect(code: string, cursorPos: number): Promise<InspectReplyEvent> {
+    return this.request<InspectReplyEvent>({
+      type: "inspect_request",
+      request_id: crypto.randomUUID(),
+      code,
+      cursor_pos: cursorPos,
+      detail_level: 0,
+    });
   }
 
   close(): void {
