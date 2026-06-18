@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.2",
     "matplotlib>=3.8",
+    "anthropic>=0.40",
 ]
 
 [project.optional-dependencies]

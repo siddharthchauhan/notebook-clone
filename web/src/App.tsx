@@ -13,6 +13,7 @@ import {
   type Checkpoint,
   type KernelSpec,
 } from "./lib/document";
+import { aiStatus } from "./lib/ai";
 
 const NOTEBOOK_ID = "default";
 
@@ -63,6 +64,10 @@ export default function App() {
       socket.connect();
       setReady(true);
       void refreshCheckpoints();
+      // Gate the AI controls on whether the server has a provider configured.
+      void aiStatus()
+        .then((s) => !cancelled && useStore.getState().setAiAvailable(s.available))
+        .catch(() => {});
     })();
 
     return () => {

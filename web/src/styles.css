@@ -264,3 +264,111 @@ select {
   text-align: center;
   color: var(--muted);
 }
+
+/* ------------------------------------------------------------- ai assist */
+:root {
+  --ai: #8250df; /* AI accent (violet) */
+  --ai-bg: #faf7ff;
+}
+.ai-chip {
+  font-size: 12px;
+  color: var(--ai);
+  border: 1px solid #e3d6fb;
+  background: var(--ai-bg);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+.ai-row {
+  margin-top: 6px;
+}
+.ai-toggle {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+}
+.ai-toggle:hover {
+  border-color: var(--ai);
+  color: var(--ai);
+}
+.ai-bar {
+  margin-top: 6px;
+  border: 1px solid #e3d6fb;
+  background: var(--ai-bg);
+  border-radius: 8px;
+  padding: 8px;
+}
+.ai-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ai-input {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.ai-input:focus {
+  outline: none;
+  border-color: var(--ai);
+}
+.ai-bar button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.ai-bar button:hover:not(:disabled) {
+  border-color: var(--ai);
+  color: var(--ai);
+}
+.ai-bar button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ai-generate {
+  border-color: var(--ai) !important;
+  color: var(--ai);
+}
+.ai-close,
+.ai-cancel {
+  color: var(--muted);
+}
+.ai-error {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--error-fg);
+}
+.ai-preview {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 320px;
+  overflow: auto;
+}
+.ai-preview.code {
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+}
+.ai-preview.text {
+  font-size: 13.5px;
+}
+.ai-preview.text :first-child {
+  margin-top: 0;
+}
+.ai-preview.text :last-child {
+  margin-bottom: 0;
+}

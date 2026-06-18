@@ -3,6 +3,7 @@ import { useStore, type CellState, type CellType } from "../lib/store";
 import type { NotebookSocket } from "../lib/ws";
 import { Editor } from "./Editor";
 import { OutputView } from "./outputs";
+import { AiAssist } from "./AiAssist";
 import { renderMarkdown } from "../lib/markdown";
 import { stripAnsi } from "../lib/ansi";
 
@@ -63,6 +64,8 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
         )}
 
         {cell.cell_type === "code" && <OutputView outputs={cell.outputs} />}
+
+        <AiAssist cell={cell} />
       </div>
     </div>
   );

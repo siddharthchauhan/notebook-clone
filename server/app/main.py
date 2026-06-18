@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import ws
+from app.ai.api import router as ai_router
 from app.config import settings
 from app.contents.api import router as contents_router
 from app.kernels.api import router as kernels_router
@@ -30,7 +31,7 @@ async def lifespan(_: FastAPI):
     await registry.shutdown_all()
 
 
-app = FastAPI(title="notebook-clone", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="notebook-clone", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,6 +43,7 @@ app.add_middleware(
 
 app.include_router(contents_router)
 app.include_router(kernels_router)
+app.include_router(ai_router)
 app.include_router(ws.router)
 
 
