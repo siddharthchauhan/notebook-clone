@@ -47,3 +47,29 @@ def put_contents(notebook_id: str, document: NotebookDocument) -> dict[str, bool
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True}
+
+
+@router.get("/{notebook_id}/checkpoints")
+def list_checkpoints(notebook_id: str) -> list[dict[str, str]]:
+    try:
+        return store.list_checkpoints(notebook_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{notebook_id}/checkpoints")
+def create_checkpoint(notebook_id: str) -> dict[str, str]:
+    try:
+        return store.create_checkpoint(notebook_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{notebook_id}/checkpoints/{checkpoint_id}/restore")
+def restore_checkpoint(notebook_id: str, checkpoint_id: str) -> dict[str, Any]:
+    try:
+        return store.restore_checkpoint(notebook_id, checkpoint_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="checkpoint not found") from exc

@@ -9,7 +9,7 @@ export type Output =
   | { kind: "error"; ename: string; evalue: string; traceback: string[] };
 
 export type CellType = "code" | "markdown";
-export type ExecutionState = "idle" | "busy" | "starting";
+export type ExecutionState = "idle" | "busy" | "starting" | "queued";
 
 export interface CellState {
   id: string;
@@ -57,6 +57,7 @@ interface NotebookStore {
   setCellType: (cellId: string, cell_type: CellType) => void;
   setRendered: (cellId: string, rendered: boolean) => void;
   clearOutputs: (cellId: string) => void;
+  markQueued: (cellId: string) => void;
 
   applyEvent: (event: ClientEvent) => void;
 }
@@ -131,6 +132,13 @@ export const useStore = create<NotebookStore>((set, get) => ({
   clearOutputs: (cellId) =>
     set((s) => ({
       cells: mapCell(s.cells, cellId, (c) => ({ ...c, outputs: [] })),
+    })),
+
+  // Submitted to the kernel but not yet running. The kernel processes
+  // execute_requests FIFO; the incoming busy/idle status overrides this.
+  markQueued: (cellId) =>
+    set((s) => ({
+      cells: mapCell(s.cells, cellId, (c) => ({ ...c, execution_state: "queued" })),
     })),
 
   applyEvent: (event) => {

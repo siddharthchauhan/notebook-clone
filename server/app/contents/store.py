@@ -13,6 +13,8 @@ server is solely responsible for producing valid nbformat.
 
 from __future__ import annotations
 
+import datetime
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any
@@ -171,3 +173,50 @@ def save_document(notebook_id: str, doc: dict[str, Any]) -> None:
     path = _path_for(notebook_id)
     NOTEBOOKS_DIR.mkdir(parents=True, exist_ok=True)
     nbformat.write(nb, path)
+
+
+# --------------------------------------------------------------------------- #
+# checkpoints  (versioned copies of a notebook)
+# --------------------------------------------------------------------------- #
+def _checkpoint_dir(notebook_id: str) -> Path:
+    safe = Path(notebook_id).name
+    if not safe or safe != notebook_id:
+        raise ValueError(f"invalid notebook id: {notebook_id!r}")
+    return NOTEBOOKS_DIR / ".checkpoints" / safe
+
+
+def _iso_mtime(path: Path) -> str:
+    ts = path.stat().st_mtime
+    return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).isoformat()
+
+
+def create_checkpoint(notebook_id: str) -> dict[str, str]:
+    """Snapshot the current saved notebook; returns ``{id, last_modified}``."""
+    load_document(notebook_id)  # seed the notebook file if it doesn't exist yet
+    cdir = _checkpoint_dir(notebook_id)
+    cdir.mkdir(parents=True, exist_ok=True)
+    cid = uuid.uuid4().hex
+    dst = cdir / f"{cid}.ipynb"
+    shutil.copyfile(_path_for(notebook_id), dst)
+    return {"id": cid, "last_modified": _iso_mtime(dst)}
+
+
+def list_checkpoints(notebook_id: str) -> list[dict[str, str]]:
+    cdir = _checkpoint_dir(notebook_id)
+    if not cdir.exists():
+        return []
+    items = [{"id": p.stem, "last_modified": _iso_mtime(p)} for p in cdir.glob("*.ipynb")]
+    return sorted(items, key=lambda x: x["last_modified"], reverse=True)
+
+
+def restore_checkpoint(notebook_id: str, checkpoint_id: str) -> dict[str, Any]:
+    """Overwrite the notebook with a checkpoint and return the document."""
+    safe_cid = Path(checkpoint_id).name
+    if not safe_cid or safe_cid != checkpoint_id:
+        raise ValueError(f"invalid checkpoint id: {checkpoint_id!r}")
+    src = _checkpoint_dir(notebook_id) / f"{safe_cid}.ipynb"
+    if not src.exists():
+        raise FileNotFoundError(checkpoint_id)
+    NOTEBOOKS_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, _path_for(notebook_id))
+    return load_document(notebook_id)
