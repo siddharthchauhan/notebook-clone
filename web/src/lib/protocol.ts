@@ -45,6 +45,12 @@ export interface DeleteVariableRequest {
   name: string;
 }
 
+export interface VariableChildrenRequest {
+  type: "variable_children_request";
+  request_id: string;
+  name: string;
+}
+
 export type ClientRequest =
   | ExecuteRequest
   | InterruptRequest
@@ -52,7 +58,8 @@ export type ClientRequest =
   | CompleteRequest
   | InspectRequest
   | VariablesRequest
-  | DeleteVariableRequest;
+  | DeleteVariableRequest
+  | VariableChildrenRequest;
 
 // --------------------------------------------------------------------------
 // server → client (discriminated union on `type`)
@@ -133,6 +140,20 @@ export interface VariablesReplyEvent {
   variables: VariableInfo[];
 }
 
+export interface VariableChild {
+  key: string; // "" for set members; repr(key) for dict; index for list/tuple
+  type: string;
+  repr: string;
+  size?: string;
+}
+
+export interface VariableChildrenReplyEvent {
+  type: "variable_children_reply";
+  request_id: string;
+  name: string;
+  children: VariableChild[];
+}
+
 export type ClientEvent =
   | StatusEvent
   | ExecInputEvent
@@ -143,4 +164,5 @@ export type ClientEvent =
   | KernelStatusEvent
   | CompleteReplyEvent
   | InspectReplyEvent
-  | VariablesReplyEvent;
+  | VariablesReplyEvent
+  | VariableChildrenReplyEvent;

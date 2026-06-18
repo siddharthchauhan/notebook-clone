@@ -160,7 +160,8 @@ export const useStore = create<NotebookStore>((set, get) => ({
     if (
       event.type === "complete_reply" ||
       event.type === "inspect_reply" ||
-      event.type === "variables_reply"
+      event.type === "variables_reply" ||
+      event.type === "variable_children_reply"
     )
       return;
     if (event.cell_id == null) return;

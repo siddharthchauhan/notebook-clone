@@ -31,6 +31,7 @@ from app.models import (
     InterruptRequest,
     KernelStatusEvent,
     RestartRequest,
+    VariableChildrenRequest,
     VariablesRequest,
 )
 
@@ -95,6 +96,8 @@ async def _dispatch(session: KernelSession, request: ClientRequest) -> None:
         session.inspect_variables(request.request_id)
     elif isinstance(request, DeleteVariableRequest):
         session.delete_variable(request.request_id, request.name)
+    elif isinstance(request, VariableChildrenRequest):
+        session.variable_children(request.request_id, request.name)
     elif isinstance(request, InterruptRequest):
         await session.interrupt()
     elif isinstance(request, RestartRequest):

@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from jupyter_client import AsyncKernelManager
 
@@ -33,6 +34,7 @@ from app.models import (
     InspectReplyEvent,
     KernelStatusEvent,
     StatusEvent,
+    VariableChildrenReplyEvent,
     VariablesReplyEvent,
 )
 
@@ -40,6 +42,17 @@ logger = logging.getLogger(__name__)
 
 # A subscriber is an async callable that delivers one event dict to a client.
 Subscriber = Callable[[dict], Awaitable[None]]
+
+
+@dataclass
+class _Capture:
+    """A diverted introspection run: its stdout is buffered, then parsed and
+    sent back as a ``variables_reply`` or ``variable_children_reply``."""
+
+    request_id: str
+    kind: str  # "variables" | "children"
+    name: str | None = None
+
 
 # Introspection run in the *user* namespace to list data variables for the
 # explorer. It only prints a JSON array to stdout (no execute_result), runs with
@@ -77,6 +90,40 @@ __ve_dump()
 del __ve_dump
 """
 
+# Introspect one container's direct children for the explorer's expand affordance.
+# Defined as a helper called with the live object; same diversion rules apply.
+_CHILDREN_SCRIPT = r"""
+def __ve_children(__obj):
+    import json as _j
+    _out = []
+    _items = None
+    if isinstance(__obj, dict):
+        _items = list(__obj.items())[:200]
+    elif isinstance(__obj, (list, tuple)):
+        _items = list(enumerate(__obj))[:200]
+    elif isinstance(__obj, (set, frozenset)):
+        _items = [(None, _x) for _x in list(__obj)[:200]]
+    if _items is not None:
+        for _k, _v in _items:
+            _t = type(_v).__name__
+            try:
+                _r = repr(_v)
+            except Exception:
+                _r = '<unreprable>'
+            if len(_r) > 120:
+                _r = _r[:117] + '...'
+            _info = {'key': '' if _k is None else repr(_k), 'type': _t, 'repr': _r}
+            try:
+                if hasattr(_v, 'shape'):
+                    _info['size'] = '×'.join(map(str, _v.shape))
+                elif _t in ('list', 'tuple', 'set', 'dict', 'str', 'bytes'):
+                    _info['size'] = str(len(_v))
+            except Exception:
+                pass
+            _out.append(_info)
+    print(_j.dumps(_out))
+"""
+
 
 class KernelSession:
     def __init__(self, kernel_name: str | None = None) -> None:
@@ -87,9 +134,9 @@ class KernelSession:
         # Correlation state.
         self.msg_to_cell: dict[str, str] = {}  # execute msg_id -> cell_id
         self.pending_requests: dict[str, str] = {}  # complete/inspect id -> request_id
-        # Variable-explorer introspection: msg_id -> request_id, and the stdout
-        # buffer we accumulate for that msg until idle (then parse + reply).
-        self.var_requests: dict[str, str] = {}
+        # Variable-explorer introspection: msg_id -> capture metadata, and the
+        # stdout buffer we accumulate for that msg until idle (then parse + reply).
+        self.var_requests: dict[str, _Capture] = {}
         self.var_buffers: dict[str, str] = {}
 
         self._subscribers: set[Subscriber] = set()
@@ -189,13 +236,24 @@ class KernelSession:
             prefix = f"try:\n    del {name}\nexcept Exception:\n    pass\n"
         return self._run_variables(request_id, prefix + _VARIABLES_SCRIPT)
 
-    def _run_variables(self, request_id: str, code: str) -> str:
+    def variable_children(self, request_id: str, name: str) -> str:
+        """List the direct children of one container global (explorer expand)."""
+        if name.isidentifier():
+            # name is validated as an identifier, so this can't inject.
+            code = _CHILDREN_SCRIPT + f"\n__ve_children({name})\ndel __ve_children\n"
+        else:
+            code = "print('[]')"
+        return self._run_variables(request_id, code, kind="children", name=name)
+
+    def _run_variables(
+        self, request_id: str, code: str, kind: str = "variables", name: str | None = None
+    ) -> str:
         if self.kc is None:
             raise RuntimeError("kernel session not started")
         msg_id = self.kc.execute(
             code, silent=False, store_history=False, allow_stdin=False
         )
-        self.var_requests[msg_id] = request_id
+        self.var_requests[msg_id] = _Capture(request_id, kind, name)
         self.var_buffers[msg_id] = ""
         return msg_id
 
@@ -272,7 +330,7 @@ class KernelSession:
             # Variable-explorer introspection is diverted, never broadcast as
             # cell output: buffer its stdout, then parse + reply on idle.
             if parent_id in self.var_requests:
-                await self._handle_variables_msg(parent_id, msg_type, content)
+                await self._handle_var_capture(parent_id, msg_type, content)
                 continue
 
             cell_id = self.msg_to_cell.get(parent_id) if parent_id else None
@@ -288,26 +346,34 @@ class KernelSession:
             ):
                 del self.msg_to_cell[parent_id]
 
-    async def _handle_variables_msg(
+    async def _handle_var_capture(
         self, parent_id: str, msg_type: str, content: dict
     ) -> None:
         """Accumulate introspection stdout; on idle, parse it and reply."""
         if msg_type == "stream" and content.get("name") == "stdout":
             self.var_buffers[parent_id] += content.get("text", "")
         elif msg_type == "status" and content.get("execution_state") == "idle":
-            request_id = self.var_requests.pop(parent_id, None)
+            cap = self.var_requests.pop(parent_id, None)
             raw = self.var_buffers.pop(parent_id, "")
-            variables: list[dict] = []
+            payload: list[dict] = []
             try:
                 import json
 
-                variables = json.loads(raw.strip() or "[]")
+                payload = json.loads(raw.strip() or "[]")
             except Exception:
-                logger.warning("could not parse variables payload")
-            if request_id is not None:
+                logger.warning("could not parse introspection payload")
+            if cap is None:
+                return
+            if cap.kind == "children":
+                await self._broadcast(
+                    VariableChildrenReplyEvent(
+                        request_id=cap.request_id, name=cap.name or "", children=payload
+                    ).model_dump()
+                )
+            else:
                 await self._broadcast(
                     VariablesReplyEvent(
-                        request_id=request_id, variables=variables
+                        request_id=cap.request_id, variables=payload
                     ).model_dump()
                 )
 

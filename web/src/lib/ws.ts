@@ -3,11 +3,16 @@ import type {
   ClientRequest,
   CompleteReplyEvent,
   InspectReplyEvent,
+  VariableChildrenReplyEvent,
   VariablesReplyEvent,
 } from "./protocol";
 import { useStore } from "./store";
 
-type ReplyEvent = CompleteReplyEvent | InspectReplyEvent | VariablesReplyEvent;
+type ReplyEvent =
+  | CompleteReplyEvent
+  | InspectReplyEvent
+  | VariablesReplyEvent
+  | VariableChildrenReplyEvent;
 
 // WebSocket client for one notebook. Output/status events are dispatched into
 // the store; complete/inspect replies resolve the matching pending promise by
@@ -49,7 +54,8 @@ export class NotebookSocket {
       if (
         event.type === "complete_reply" ||
         event.type === "inspect_reply" ||
-        event.type === "variables_reply"
+        event.type === "variables_reply" ||
+        event.type === "variable_children_reply"
       ) {
         const resolve = this.pending.get(event.request_id);
         if (resolve) {
@@ -152,6 +158,14 @@ export class NotebookSocket {
   deleteVariable(name: string): Promise<VariablesReplyEvent> {
     return this.request<VariablesReplyEvent>({
       type: "delete_variable_request",
+      request_id: crypto.randomUUID(),
+      name,
+    });
+  }
+
+  variableChildren(name: string): Promise<VariableChildrenReplyEvent> {
+    return this.request<VariableChildrenReplyEvent>({
+      type: "variable_children_request",
       request_id: crypto.randomUUID(),
       name,
     });

@@ -61,3 +61,44 @@ async def test_delete_variable_rejects_non_identifier(kernel):
         lambda e: e.get("type") == "variables_reply" and e.get("request_id") == "d2"
     )
     assert "x" in {v["name"] for v in reply["variables"]}
+
+
+async def test_variable_children_lists_dict_items(kernel):
+    session, collector = kernel
+    session.execute("c1", "m = {'a': 1, 'b': 2}")
+    await collector.wait_idle("c1")
+
+    session.variable_children("ch1", "m")
+    reply = await collector.wait_event(
+        lambda e: e.get("type") == "variable_children_reply"
+        and e.get("request_id") == "ch1"
+    )
+    assert reply["name"] == "m"
+    by_key = {c["key"]: c for c in reply["children"]}
+    assert "'a'" in by_key and "'b'" in by_key
+    assert by_key["'a'"]["repr"] == "1"
+
+
+async def test_variable_children_lists_list_items_in_order(kernel):
+    session, collector = kernel
+    session.execute("c1", "xs = [10, 20, 30]")
+    await collector.wait_idle("c1")
+
+    session.variable_children("ch2", "xs")
+    reply = await collector.wait_event(
+        lambda e: e.get("type") == "variable_children_reply"
+        and e.get("request_id") == "ch2"
+    )
+    assert [c["repr"] for c in reply["children"]] == ["10", "20", "30"]
+    assert reply["children"][0]["key"] == "0"
+
+
+async def test_variable_children_rejects_non_identifier(kernel):
+    """A non-identifier name yields no children — guards against code injection."""
+    session, collector = kernel
+    session.variable_children("ch3", "m; import os")
+    reply = await collector.wait_event(
+        lambda e: e.get("type") == "variable_children_reply"
+        and e.get("request_id") == "ch3"
+    )
+    assert reply["children"] == []

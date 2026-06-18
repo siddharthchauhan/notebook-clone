@@ -188,8 +188,8 @@ try {
     check("ai controls hidden when unavailable", toggles === 0, `toggles=${toggles}`);
   }
 
-  // 12) variable explorer: define a var, open the panel, see it listed
-  await setSource(1, "explorer_var = 42");
+  // 12) variable explorer: define vars, open the panel, see them listed
+  await setSource(1, 'explorer_var = 42\nexplorer_map = {"a": 1, "b": 2}');
   await runAndWaitIdle(page.locator(".cell.code").first(), 1);
   await page.locator(".btn-variables").click();
   const sawVar = await page
@@ -211,7 +211,27 @@ try {
     .catch(() => false);
   check("variable inspect", inspected, "");
 
-  // 12c) delete a variable from the kernel
+  // 12c) expand a container variable to see its children
+  await page.locator(".var-row", { hasText: "explorer_map" }).locator(".var-expand").click();
+  const expandedChild = await page
+    .locator(".var-child-row", { hasText: "'a'" })
+    .first()
+    .waitFor({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+  check("variable expand children", expandedChild, "");
+
+  // 12d) sort by a column header
+  await page.locator(".var-th", { hasText: "Type" }).click();
+  const sorted = await page
+    .locator(".var-th.sorted", { hasText: "Type" })
+    .first()
+    .waitFor({ timeout: 4000 })
+    .then(() => true)
+    .catch(() => false);
+  check("variable sort", sorted, "");
+
+  // 12e) delete a variable from the kernel
   await page.locator(".var-row", { hasText: "explorer_var" }).locator(".var-del").click();
   const deleted = await page
     .waitForFunction(

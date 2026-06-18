@@ -72,6 +72,14 @@ class DeleteVariableRequest(BaseModel):
     name: str
 
 
+class VariableChildrenRequest(BaseModel):
+    """Ask the kernel for one container global's direct children (explorer expand)."""
+
+    type: Literal["variable_children_request"] = "variable_children_request"
+    request_id: str
+    name: str
+
+
 ClientRequest = Annotated[
     Union[
         ExecuteRequest,
@@ -81,6 +89,7 @@ ClientRequest = Annotated[
         InspectRequest,
         VariablesRequest,
         DeleteVariableRequest,
+        VariableChildrenRequest,
     ],
     Field(discriminator="type"),
 ]
@@ -176,6 +185,15 @@ class VariablesReplyEvent(BaseModel):
     variables: list[dict[str, Any]]
 
 
+class VariableChildrenReplyEvent(BaseModel):
+    """One container's direct children: ``{key, type, repr, size?}`` per item."""
+
+    type: Literal["variable_children_reply"] = "variable_children_reply"
+    request_id: str
+    name: str
+    children: list[dict[str, Any]]
+
+
 ClientEvent = Annotated[
     Union[
         StatusEvent,
@@ -188,6 +206,7 @@ ClientEvent = Annotated[
         CompleteReplyEvent,
         InspectReplyEvent,
         VariablesReplyEvent,
+        VariableChildrenReplyEvent,
     ],
     Field(discriminator="type"),
 ]
