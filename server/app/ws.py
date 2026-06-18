@@ -30,6 +30,7 @@ from app.models import (
     InterruptRequest,
     KernelStatusEvent,
     RestartRequest,
+    VariablesRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,8 @@ async def _dispatch(session: KernelSession, request: ClientRequest) -> None:
         session.inspect(
             request.request_id, request.code, request.cursor_pos, request.detail_level
         )
+    elif isinstance(request, VariablesRequest):
+        session.inspect_variables(request.request_id)
     elif isinstance(request, InterruptRequest):
         await session.interrupt()
     elif isinstance(request, RestartRequest):

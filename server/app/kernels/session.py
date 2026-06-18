@@ -33,12 +33,49 @@ from app.models import (
     InspectReplyEvent,
     KernelStatusEvent,
     StatusEvent,
+    VariablesReplyEvent,
 )
 
 logger = logging.getLogger(__name__)
 
 # A subscriber is an async callable that delivers one event dict to a client.
 Subscriber = Callable[[dict], Awaitable[None]]
+
+# Introspection run in the *user* namespace to list data variables for the
+# explorer. It only prints a JSON array to stdout (no execute_result), runs with
+# store_history=False so it never advances the [n] prompt, and leaks no lasting
+# globals (its one helper is deleted; underscore-prefixed names are skipped).
+_VARIABLES_SCRIPT = r"""
+def __ve_dump():
+    import json as _j
+    _out = []
+    for _k, _v in list(globals().items()):
+        if _k.startswith('_') or _k in ('In', 'Out', 'exit', 'quit', 'get_ipython'):
+            continue
+        _t = type(_v).__name__
+        if _t in ('module', 'function', 'builtin_function_or_method', 'type', 'method'):
+            continue
+        if callable(_v):
+            continue
+        try:
+            _r = repr(_v)
+        except Exception:
+            _r = '<unreprable>'
+        if len(_r) > 120:
+            _r = _r[:117] + '...'
+        _info = {'name': _k, 'type': _t, 'repr': _r}
+        try:
+            if hasattr(_v, 'shape'):
+                _info['size'] = '×'.join(map(str, _v.shape))
+            elif _t in ('list', 'tuple', 'set', 'dict', 'str', 'bytes'):
+                _info['size'] = str(len(_v))
+        except Exception:
+            pass
+        _out.append(_info)
+    print(_j.dumps(_out))
+__ve_dump()
+del __ve_dump
+"""
 
 
 class KernelSession:
@@ -50,6 +87,10 @@ class KernelSession:
         # Correlation state.
         self.msg_to_cell: dict[str, str] = {}  # execute msg_id -> cell_id
         self.pending_requests: dict[str, str] = {}  # complete/inspect id -> request_id
+        # Variable-explorer introspection: msg_id -> request_id, and the stdout
+        # buffer we accumulate for that msg until idle (then parse + reply).
+        self.var_requests: dict[str, str] = {}
+        self.var_buffers: dict[str, str] = {}
 
         self._subscribers: set[Subscriber] = set()
         self._iopub_task: asyncio.Task | None = None
@@ -136,6 +177,17 @@ class KernelSession:
         self.pending_requests[msg_id] = request_id
         return msg_id
 
+    def inspect_variables(self, request_id: str) -> str:
+        """Run the introspection script; its stdout is captured by the pump."""
+        if self.kc is None:
+            raise RuntimeError("kernel session not started")
+        msg_id = self.kc.execute(
+            _VARIABLES_SCRIPT, silent=False, store_history=False, allow_stdin=False
+        )
+        self.var_requests[msg_id] = request_id
+        self.var_buffers[msg_id] = ""
+        return msg_id
+
     # ----------------------------------------------------------------- #
     # control operations
     # ----------------------------------------------------------------- #
@@ -158,6 +210,8 @@ class KernelSession:
         await self._stop_pumps()
         self.msg_to_cell.clear()
         self.pending_requests.clear()
+        self.var_requests.clear()
+        self.var_buffers.clear()
 
         await self.km.restart_kernel(now=True)
         if self.kc is not None:
@@ -201,10 +255,16 @@ class KernelSession:
                 continue
 
             parent_id = msg.get("parent_header", {}).get("msg_id")
-            cell_id = self.msg_to_cell.get(parent_id) if parent_id else None
             msg_type = msg["header"]["msg_type"]
             content = msg["content"]
 
+            # Variable-explorer introspection is diverted, never broadcast as
+            # cell output: buffer its stdout, then parse + reply on idle.
+            if parent_id in self.var_requests:
+                await self._handle_variables_msg(parent_id, msg_type, content)
+                continue
+
+            cell_id = self.msg_to_cell.get(parent_id) if parent_id else None
             event = to_client_event(cell_id, msg_type, content)
             if event is not None:
                 await self._broadcast(event.model_dump())
@@ -216,6 +276,29 @@ class KernelSession:
                 and parent_id in self.msg_to_cell
             ):
                 del self.msg_to_cell[parent_id]
+
+    async def _handle_variables_msg(
+        self, parent_id: str, msg_type: str, content: dict
+    ) -> None:
+        """Accumulate introspection stdout; on idle, parse it and reply."""
+        if msg_type == "stream" and content.get("name") == "stdout":
+            self.var_buffers[parent_id] += content.get("text", "")
+        elif msg_type == "status" and content.get("execution_state") == "idle":
+            request_id = self.var_requests.pop(parent_id, None)
+            raw = self.var_buffers.pop(parent_id, "")
+            variables: list[dict] = []
+            try:
+                import json
+
+                variables = json.loads(raw.strip() or "[]")
+            except Exception:
+                logger.warning("could not parse variables payload")
+            if request_id is not None:
+                await self._broadcast(
+                    VariablesReplyEvent(
+                        request_id=request_id, variables=variables
+                    ).model_dump()
+                )
 
     async def _pump_shell(self) -> None:
         assert self.kc is not None

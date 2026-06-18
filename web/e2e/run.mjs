@@ -11,6 +11,7 @@ const page = await browser.newPage();
 const consoleErrors = [];
 page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
 page.on("pageerror", (e) => consoleErrors.push(String(e)));
+page.on("dialog", (d) => d.accept()); // auto-accept confirm() (e.g. delete notebook)
 
 const setSource = (i, src) =>
   page.evaluate(
@@ -186,6 +187,73 @@ try {
     const toggles = await page.locator(".ai-toggle").count();
     check("ai controls hidden when unavailable", toggles === 0, `toggles=${toggles}`);
   }
+
+  // 12) variable explorer: define a var, open the panel, see it listed
+  await setSource(1, "explorer_var = 42");
+  await runAndWaitIdle(page.locator(".cell.code").first(), 1);
+  await page.locator(".btn-variables").click();
+  const sawVar = await page
+    .locator(".var-name", { hasText: "explorer_var" })
+    .first()
+    .waitFor({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+  check("variable explorer lists var", sawVar, "");
+
+  // 13) export endpoints (.ipynb + HTML)
+  const ipynbResp = await page.request.get(`${BASE}/api/contents/default/export/ipynb`);
+  check(
+    "export ipynb",
+    ipynbResp.ok() && (ipynbResp.headers()["content-type"] || "").includes("ipynb"),
+    `status=${ipynbResp.status()}`,
+  );
+  const htmlResp = await page.request.get(`${BASE}/api/contents/default/export/html`);
+  const htmlBody = await htmlResp.text();
+  check(
+    "export html",
+    htmlResp.ok() && htmlBody.toLowerCase().includes("<html"),
+    `status=${htmlResp.status()}`,
+  );
+
+  // 14) AI chat (echo provider) — only when AI is configured
+  if (aiAvailable) {
+    await page.locator(".btn-chat").click();
+    await page.locator(".chat-input").fill("ping from e2e");
+    await page.locator(".chat-send").click();
+    const replied = await page
+      .locator(".chat-msg.assistant")
+      .filter({ hasText: "ping from e2e" })
+      .first()
+      .waitFor({ timeout: 8000 })
+      .then(() => true)
+      .catch(() => false);
+    check("ai chat reply", replied, "");
+  }
+
+  // 15) multi-notebook: create + switch, then delete (auto-switches away)
+  await page.locator(".btn-notebooks").click();
+  await page.locator(".nb-new-input").fill("e2e_nb");
+  await page.locator(".nb-new").click();
+  const switched = await page
+    .waitForFunction(() => document.querySelector(".btn-notebooks")?.textContent?.includes("e2e_nb"), null, {
+      timeout: 8000,
+    })
+    .then(() => true)
+    .catch(() => false);
+  check("notebook create + open", switched, "");
+
+  await page.locator(".nb-item", { hasText: "e2e_nb" }).locator(".nb-delete").click();
+  const removed = await page
+    .waitForFunction(
+      () =>
+        !document.querySelector(".btn-notebooks")?.textContent?.includes("e2e_nb") &&
+        ![...document.querySelectorAll(".nb-item")].some((el) => el.textContent?.includes("e2e_nb")),
+      null,
+      { timeout: 8000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("notebook delete", removed, "");
 
   check("no console errors", consoleErrors.length === 0, consoleErrors.slice(0, 3).join(" | "));
 } catch (e) {

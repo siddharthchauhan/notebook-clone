@@ -86,7 +86,10 @@ export const useStore = create<NotebookStore>((set, get) => ({
   setKernel: (kernelStatus, name) =>
     set((s) => ({ kernelStatus, kernelName: name ?? s.kernelName })),
   setAiAvailable: (aiAvailable) => set({ aiAvailable }),
-  setCells: (cells) => set({ cells }),
+  // A wholesale document load (initial, checkpoint restore, notebook switch) is
+  // a clean baseline — reset the autosave revision so it doesn't immediately
+  // re-save freshly loaded content.
+  setCells: (cells) => set({ cells, revision: 0 }),
 
   setSource: (cellId, source) =>
     set((s) => ({
@@ -153,8 +156,13 @@ export const useStore = create<NotebookStore>((set, get) => ({
       get().setKernel(event.state as KernelStatus, event.kernel_name);
       return;
     }
-    // complete_reply / inspect_reply are resolved in ws.ts, never reach here.
-    if (event.type === "complete_reply" || event.type === "inspect_reply") return;
+    // complete/inspect/variables replies are resolved in ws.ts, never here.
+    if (
+      event.type === "complete_reply" ||
+      event.type === "inspect_reply" ||
+      event.type === "variables_reply"
+    )
+      return;
     if (event.cell_id == null) return;
     const cellId = event.cell_id;
 

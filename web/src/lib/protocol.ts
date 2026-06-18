@@ -34,12 +34,18 @@ export interface InspectRequest {
   detail_level?: number;
 }
 
+export interface VariablesRequest {
+  type: "variables_request";
+  request_id: string;
+}
+
 export type ClientRequest =
   | ExecuteRequest
   | InterruptRequest
   | RestartRequest
   | CompleteRequest
-  | InspectRequest;
+  | InspectRequest
+  | VariablesRequest;
 
 // --------------------------------------------------------------------------
 // server → client (discriminated union on `type`)
@@ -107,6 +113,19 @@ export interface InspectReplyEvent {
   data: Record<string, unknown>;
 }
 
+export interface VariableInfo {
+  name: string;
+  type: string;
+  repr: string;
+  size?: string;
+}
+
+export interface VariablesReplyEvent {
+  type: "variables_reply";
+  request_id: string;
+  variables: VariableInfo[];
+}
+
 export type ClientEvent =
   | StatusEvent
   | ExecInputEvent
@@ -116,4 +135,5 @@ export type ClientEvent =
   | ClearOutputEvent
   | KernelStatusEvent
   | CompleteReplyEvent
-  | InspectReplyEvent;
+  | InspectReplyEvent
+  | VariablesReplyEvent;

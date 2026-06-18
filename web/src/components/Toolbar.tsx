@@ -1,9 +1,11 @@
 import { useStore } from "../lib/store";
 import type { NotebookSocket } from "../lib/ws";
 import type { Checkpoint, KernelSpec } from "../lib/document";
+import type { PanelTab } from "./SidePanel";
 
 interface ToolbarProps {
   socket: NotebookSocket;
+  notebookId: string;
   kernelSpecs: KernelSpec[];
   kernelName: string | null;
   onChangeKernel: (name: string) => void;
@@ -11,10 +13,14 @@ interface ToolbarProps {
   checkpoints: Checkpoint[];
   onCreateCheckpoint: () => void;
   onRestoreCheckpoint: (checkpointId: string) => void;
+  onToggleBrowser: () => void;
+  onTogglePanel: (tab: PanelTab) => void;
+  onExport: (fmt: "ipynb" | "html") => void;
 }
 
 export function Toolbar({
   socket,
+  notebookId,
   kernelSpecs,
   kernelName,
   onChangeKernel,
@@ -22,6 +28,9 @@ export function Toolbar({
   checkpoints,
   onCreateCheckpoint,
   onRestoreCheckpoint,
+  onToggleBrowser,
+  onTogglePanel,
+  onExport,
 }: ToolbarProps) {
   const connected = useStore((s) => s.connected);
   const kernelStatus = useStore((s) => s.kernelStatus);
@@ -60,6 +69,10 @@ export function Toolbar({
     <header className="toolbar">
       <strong className="brand">Notebook Clone</strong>
 
+      <button className="btn-notebooks" onClick={onToggleBrowser} title="Browse notebooks">
+        ☰ {notebookId}
+      </button>
+
       <div className="toolbar-group">
         <button onClick={runAll} title="Run all cells">⏩ Run all</button>
         <button onClick={() => socket.interrupt()} title="Interrupt the kernel">■ Interrupt</button>
@@ -83,6 +96,29 @@ export function Toolbar({
             </option>
           ))}
         </select>
+        <select
+          className="export-select"
+          value=""
+          onChange={(e) => {
+            if (e.target.value) onExport(e.target.value as "ipynb" | "html");
+          }}
+          title="Export this notebook"
+        >
+          <option value="">Export…</option>
+          <option value="ipynb">.ipynb</option>
+          <option value="html">HTML</option>
+        </select>
+      </div>
+
+      <div className="toolbar-group">
+        <button className="btn-variables" onClick={() => onTogglePanel("variables")} title="Variable explorer">
+          🔎 Variables
+        </button>
+        {aiAvailable && (
+          <button className="btn-chat" onClick={() => onTogglePanel("chat")} title="AI chat">
+            ✨ Chat
+          </button>
+        )}
       </div>
 
       <span className="spacer" />
@@ -102,12 +138,6 @@ export function Toolbar({
           ))}
         </select>
       </label>
-
-      {aiAvailable && (
-        <span className="ai-chip" title="AI assist is enabled">
-          ✨ AI
-        </span>
-      )}
 
       <span className={`save-state ${saveState}`}>
         {saveState === "saving" ? "saving…" : saveState === "dirty" ? "unsaved" : "saved"}

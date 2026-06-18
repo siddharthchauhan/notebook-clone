@@ -3,10 +3,11 @@ import type {
   ClientRequest,
   CompleteReplyEvent,
   InspectReplyEvent,
+  VariablesReplyEvent,
 } from "./protocol";
 import { useStore } from "./store";
 
-type ReplyEvent = CompleteReplyEvent | InspectReplyEvent;
+type ReplyEvent = CompleteReplyEvent | InspectReplyEvent | VariablesReplyEvent;
 
 // WebSocket client for one notebook. Output/status events are dispatched into
 // the store; complete/inspect replies resolve the matching pending promise by
@@ -45,7 +46,11 @@ export class NotebookSocket {
         console.error("failed to parse server event", err, ev.data);
         return;
       }
-      if (event.type === "complete_reply" || event.type === "inspect_reply") {
+      if (
+        event.type === "complete_reply" ||
+        event.type === "inspect_reply" ||
+        event.type === "variables_reply"
+      ) {
         const resolve = this.pending.get(event.request_id);
         if (resolve) {
           this.pending.delete(event.request_id);
@@ -134,6 +139,13 @@ export class NotebookSocket {
       code,
       cursor_pos: cursorPos,
       detail_level: 0,
+    });
+  }
+
+  variables(): Promise<VariablesReplyEvent> {
+    return this.request<VariablesReplyEvent>({
+      type: "variables_request",
+      request_id: crypto.randomUUID(),
     });
   }
 

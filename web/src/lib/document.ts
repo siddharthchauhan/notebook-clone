@@ -108,3 +108,36 @@ export async function loadKernelSpecs(): Promise<{
   if (!r.ok) throw new Error(`kernelspecs failed: ${r.status}`);
   return r.json();
 }
+
+// ----------------------------------------------------------- notebooks --- //
+
+export interface NotebookEntry {
+  id: string;
+  last_modified: string;
+}
+
+export async function listNotebooks(): Promise<NotebookEntry[]> {
+  const r = await fetch("/api/notebooks");
+  if (!r.ok) throw new Error(`list notebooks failed: ${r.status}`);
+  return r.json();
+}
+
+export async function createNotebook(name: string): Promise<NotebookEntry> {
+  const r = await fetch("/api/notebooks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (r.status === 409) throw new Error("A notebook with that name already exists");
+  if (!r.ok) throw new Error(`create notebook failed: ${r.status}`);
+  return r.json();
+}
+
+export async function deleteNotebook(id: string): Promise<void> {
+  const r = await fetch(`/api/notebooks/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!r.ok) throw new Error(`delete notebook failed: ${r.status}`);
+}
+
+export function exportNotebookUrl(id: string, fmt: "ipynb" | "html"): string {
+  return `/api/contents/${encodeURIComponent(id)}/export/${fmt}`;
+}

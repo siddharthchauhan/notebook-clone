@@ -34,6 +34,18 @@ back to the browser, **correctly correlated by cell**.
   no key configured the server reports unavailable and the UI hides all AI
   controls. A keyless `echo` provider drives the tests and e2e.
 
+**Phase 4 — workspace** (explorer · export · multi-notebook · chat)
+
+- **Variable explorer**: a side panel listing the kernel's user-defined globals
+  (type, size, repr), auto-refreshing after each run. Introspection is diverted
+  through the single iopub pump — it never advances the `[n]` prompt or leaks
+  output to a cell.
+- **Export**: download any notebook as **.ipynb** or rendered **HTML** (nbconvert).
+- **Multi-notebook browser**: list / open / create / delete notebooks from a left
+  sidebar — no longer a single hardcoded notebook.
+- **AI chat panel**: a conversational sidebar that streams Claude replies with the
+  current notebook as context (complements the per-cell actions).
+
 ## Architecture
 
 ```
@@ -50,6 +62,11 @@ browser (Vite :5173)                      server (uvicorn :8000)
 │ per-cell AI (SSE stream)  │  SSE         │   /api/ai/complete → Claude (stream)│
 └──────────────────────────┘              └───────────────────────────────────┘
 ```
+
+Phase 4 adds `/api/notebooks` (list/create/delete), notebook export at
+`/api/contents/{id}/export/{ipynb,html}`, a `variables_request` over the same WS
+(its stdout captured by `msg_id`, parsed to a `variables_reply`), and the chat
+endpoint `/api/ai/chat` — all on the existing spine.
 
 **The crux (unchanged since Phase 1).** A kernel knows nothing about "cells".
 Every output carries a `parent_header.msg_id` pointing back to the
@@ -70,24 +87,26 @@ server/                FastAPI + jupyter_client backend (Python 3.12, uv)
       manager.py       KernelRegistry: one session per notebook_id
       translate.py     iopub message → client event (pure)
       api.py           GET /api/kernelspecs, DELETE /api/kernels/{id}
-    contents/          nbformat <-> client "document" mapping; autosave API
-    ai/                AI assist: service.py (prompt + pluggable provider),
-                       api.py (GET /api/ai/status, POST /api/ai/complete SSE)
+    contents/          nbformat <-> document mapping; autosave, notebooks, export
+    ai/                AI assist: service.py (prompts + pluggable provider),
+                       api.py (status, /complete + /chat SSE)
     ws.py              /ws/{notebook_id}: attach, dispatch, detach
     main.py            app wiring, CORS, lifespan (shutdown_all)
-  tests/               38 pytest: Phase 1 criteria + persistence/interrupt/
+  tests/               46 pytest: Phase 1 criteria + persistence/interrupt/
                        restart/complete/inspect + document round-trip + WS +
-                       AI prompt/echo-stream/status/SSE
+                       AI (prompt/echo/status/SSE/chat) + variables + notebooks
+                       + export
 web/                   Vite + React + TypeScript frontend
   src/
     lib/protocol.ts    TS mirror of models.py
     lib/store.ts       zustand: multi-cell, append-only streams, autosave rev
-    lib/ws.ts          WS client: reconnect + request/reply (complete/inspect)
-    lib/document.ts    cell model <-> server document; contents/kernelspecs API
-    lib/ai.ts          AI status + SSE-over-fetch streamer
-    components/        Editor (CM6 + autocomplete/inspect), Cell, Toolbar,
-                       AiAssist (per-cell ✨ AI), outputs/ (rich MIME renderers)
-  e2e/run.mjs          Playwright smoke test of the live UI
+    lib/ws.ts          WS client: reconnect + request/reply (complete/inspect/vars)
+    lib/document.ts    document, kernelspecs, notebooks, export REST helpers
+    lib/ai.ts          AI status + SSE-over-fetch streamer (complete + chat)
+    components/        Editor, Cell, Toolbar, AiAssist (per-cell ✨ AI),
+                       VariableExplorer, AiChat, NotebookBrowser, SidePanel,
+                       outputs/ (rich MIME renderers)
+  e2e/run.mjs          Playwright smoke test of the live UI (20 checks)
 ```
 
 ## Quickstart
@@ -123,22 +142,23 @@ Shift+Tab on a symbol for docs.
 ## Verification
 
 ```bash
-cd server && uv run pytest        # 38 passed (headless, real kernel)
+cd server && uv run pytest        # 46 passed (headless, real kernel)
 
 cd web && npm run build           # typecheck + production build
-# Optional headless-browser smoke test (servers must be running). Start the
-# server with NBCLONE_AI_PROVIDER=echo to also exercise the AI flow:
+# Optional headless-browser smoke test. Start the server with
+# NBCLONE_AI_PROVIDER=echo so the AI flows run keyless; the e2e expects a fresh
+# starter, so clear server/notebooks/*.ipynb first if you've used the app:
 npx playwright install chromium
-npm run e2e                       # drives the real UI end-to-end
+npm run e2e                       # 20 checks, drives the real UI end-to-end
 ```
 
 The e2e check exercises markdown rendering, stdout, tracebacks, inline PNG,
-add-cell, **variable persistence across cells**, restart-clears-state, markdown
-rendering, the queued indicator, checkpoints, and — when AI is configured —
-**AI generate** (streams a new cell) and **AI explain** — all in a real browser
+add-cell, **variable persistence across cells**, restart-clears-state, the queued
+indicator, checkpoints, **AI generate/explain/chat**, the **variable explorer**,
+**.ipynb/HTML export**, and **notebook create/delete** — all in a real browser
 against the live stack.
 
 ## Out of scope (future)
 
-Real-time collaboration, a variable explorer/debugger, `ipywidgets`, notebook
-export (nbconvert), a multi-notebook file browser, auth, and data connectors.
+Real-time collaboration, `ipywidgets`, auth, and data connectors — each a
+focused follow-up rather than incremental polish.

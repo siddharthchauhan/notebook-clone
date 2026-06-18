@@ -156,14 +156,18 @@ def _path_for(notebook_id: str) -> Path:
     return NOTEBOOKS_DIR / f"{safe}.ipynb"
 
 
-def load_document(notebook_id: str) -> dict[str, Any]:
-    """Load a notebook as a client document, seeding the starter if absent."""
+def read_notebook(notebook_id: str) -> NotebookNode:
+    """Read a notebook from disk, seeding the starter if absent."""
     path = _path_for(notebook_id)
     if not path.exists():
         NOTEBOOKS_DIR.mkdir(parents=True, exist_ok=True)
         nbformat.write(_starter_notebook(), path)
-    nb = nbformat.read(path, as_version=NBFORMAT_VERSION)
-    return notebook_to_document(nb)
+    return nbformat.read(path, as_version=NBFORMAT_VERSION)
+
+
+def load_document(notebook_id: str) -> dict[str, Any]:
+    """Load a notebook as a client document, seeding the starter if absent."""
+    return notebook_to_document(read_notebook(notebook_id))
 
 
 def save_document(notebook_id: str, doc: dict[str, Any]) -> None:
@@ -220,3 +224,55 @@ def restore_checkpoint(notebook_id: str, checkpoint_id: str) -> dict[str, Any]:
     NOTEBOOKS_DIR.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(src, _path_for(notebook_id))
     return load_document(notebook_id)
+
+
+# --------------------------------------------------------------------------- #
+# multi-notebook management
+# --------------------------------------------------------------------------- #
+def list_notebooks() -> list[dict[str, str]]:
+    """List ``.ipynb`` files in the notebooks dir (newest first)."""
+    if not NOTEBOOKS_DIR.exists():
+        return []
+    items = [
+        {"id": p.stem, "last_modified": _iso_mtime(p)}
+        for p in NOTEBOOKS_DIR.glob("*.ipynb")
+    ]
+    return sorted(items, key=lambda x: x["last_modified"], reverse=True)
+
+
+def create_notebook(notebook_id: str) -> dict[str, str]:
+    """Create a new starter notebook; error if the id is taken."""
+    path = _path_for(notebook_id)  # also validates the id
+    if path.exists():
+        raise FileExistsError(notebook_id)
+    NOTEBOOKS_DIR.mkdir(parents=True, exist_ok=True)
+    nbformat.write(_starter_notebook(), path)
+    return {"id": notebook_id, "last_modified": _iso_mtime(path)}
+
+
+def delete_notebook(notebook_id: str) -> None:
+    """Delete a notebook and any of its checkpoints."""
+    _path_for(notebook_id).unlink(missing_ok=True)
+    cdir = _checkpoint_dir(notebook_id)
+    if cdir.exists():
+        shutil.rmtree(cdir, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------- #
+# export
+# --------------------------------------------------------------------------- #
+def export_notebook(notebook_id: str, fmt: str) -> tuple[bytes, str, str]:
+    """Return ``(content, media_type, filename)`` for ``fmt`` in {ipynb, html}."""
+    nb = read_notebook(notebook_id)
+    if fmt == "ipynb":
+        return (
+            nbformat.writes(nb).encode("utf-8"),
+            "application/x-ipynb+json",
+            f"{notebook_id}.ipynb",
+        )
+    if fmt == "html":
+        from nbconvert import HTMLExporter  # lazy: heavy import
+
+        body, _ = HTMLExporter(template_name="lab").from_notebook_node(nb)
+        return body.encode("utf-8"), "text/html", f"{notebook_id}.html"
+    raise ValueError(f"unsupported export format: {fmt!r}")

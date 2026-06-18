@@ -57,6 +57,13 @@ class InspectRequest(BaseModel):
     detail_level: int = 0
 
 
+class VariablesRequest(BaseModel):
+    """Ask the kernel to introspect its user-defined globals (var explorer)."""
+
+    type: Literal["variables_request"] = "variables_request"
+    request_id: str
+
+
 ClientRequest = Annotated[
     Union[
         ExecuteRequest,
@@ -64,6 +71,7 @@ ClientRequest = Annotated[
         RestartRequest,
         CompleteRequest,
         InspectRequest,
+        VariablesRequest,
     ],
     Field(discriminator="type"),
 ]
@@ -151,6 +159,14 @@ class InspectReplyEvent(BaseModel):
     data: dict[str, Any]
 
 
+class VariablesReplyEvent(BaseModel):
+    """The kernel's current user-defined globals: ``{name, type, repr, size?}``."""
+
+    type: Literal["variables_reply"] = "variables_reply"
+    request_id: str
+    variables: list[dict[str, Any]]
+
+
 ClientEvent = Annotated[
     Union[
         StatusEvent,
@@ -162,6 +178,7 @@ ClientEvent = Annotated[
         KernelStatusEvent,
         CompleteReplyEvent,
         InspectReplyEvent,
+        VariablesReplyEvent,
     ],
     Field(discriminator="type"),
 ]

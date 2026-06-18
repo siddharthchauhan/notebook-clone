@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.ai.service import AIRequest, service
+from app.ai.service import AIRequest, ChatRequest, service
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -32,14 +33,12 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-@router.post("/complete")
-async def ai_complete(req: AIRequest) -> StreamingResponse:
-    if not service.available():
-        raise HTTPException(status_code=503, detail="AI is not configured")
+def _sse_response(deltas: AsyncIterator[str]) -> StreamingResponse:
+    """Wrap a text-delta stream as an SSE response (token / done / error)."""
 
     async def gen():
         try:
-            async for delta in service.stream(req):
+            async for delta in deltas:
                 yield _sse("token", {"text": delta})
             yield _sse("done", {})
         except Exception as exc:  # surface as an SSE error, not a torn 500
@@ -52,3 +51,17 @@ async def ai_complete(req: AIRequest) -> StreamingResponse:
         # Defeat proxy/browser buffering so tokens arrive as they're produced.
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/complete")
+async def ai_complete(req: AIRequest) -> StreamingResponse:
+    if not service.available():
+        raise HTTPException(status_code=503, detail="AI is not configured")
+    return _sse_response(service.stream(req))
+
+
+@router.post("/chat")
+async def ai_chat(req: ChatRequest) -> StreamingResponse:
+    if not service.available():
+        raise HTTPException(status_code=503, detail="AI is not configured")
+    return _sse_response(service.chat(req))

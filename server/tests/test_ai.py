@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app import config
 from app.ai import service as ai_service
-from app.ai.service import AIRequest, build_prompt
+from app.ai.service import AIRequest, ChatMessage, ChatRequest, build_prompt
 from app.main import app
 
 
@@ -122,4 +122,28 @@ def test_complete_streams_sse_token_and_done(echo):
 def test_complete_returns_503_when_unavailable(unavailable):
     client = TestClient(app)
     r = client.post("/api/ai/complete", json={"action": "generate", "instruction": "hi"})
+    assert r.status_code == 503
+
+
+# -- chat -------------------------------------------------------------- #
+
+
+async def test_echo_chat_echoes_last_user_message(echo):
+    req = ChatRequest(messages=[ChatMessage(role="user", content="ping")])
+    out = "".join([chunk async for chunk in ai_service.service.chat(req)])
+    assert "ping" in out
+
+
+def test_chat_endpoint_streams_sse(echo):
+    client = TestClient(app)
+    r = client.post("/api/ai/chat", json={"messages": [{"role": "user", "content": "ping"}]})
+    assert r.status_code == 200
+    assert "text/event-stream" in r.headers["content-type"]
+    assert "ping" in _join_sse_tokens(r.text)
+    assert "event: done" in r.text
+
+
+def test_chat_returns_503_when_unavailable(unavailable):
+    client = TestClient(app)
+    r = client.post("/api/ai/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     assert r.status_code == 503
