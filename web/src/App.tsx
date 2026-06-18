@@ -1,56 +1,105 @@
 import { useEffect, useRef, useState } from "react";
 import { NotebookSocket } from "./lib/ws";
-import { useStore, type CellState } from "./lib/store";
+import { useStore, emptyCell } from "./lib/store";
 import { Notebook } from "./Notebook";
+import { Toolbar } from "./components/Toolbar";
+import {
+  loadDocument,
+  loadKernelSpecs,
+  saveDocument,
+  type KernelSpec,
+} from "./lib/document";
 
 const NOTEBOOK_ID = "default";
 
-interface RawCell {
-  cell_type: string;
-  id?: string;
-  source: string | string[];
-}
-
-function defaultCell(): CellState {
-  return { id: "cell-1", source: 'print("hi")', outputs: [], execution_state: "idle" };
-}
-
-function toCellState(raw: RawCell): CellState {
-  return {
-    id: raw.id ?? crypto.randomUUID(),
-    source: Array.isArray(raw.source) ? raw.source.join("") : raw.source ?? "",
-    outputs: [],
-    execution_state: "idle",
-  };
-}
+type SaveState = "saved" | "saving" | "dirty";
 
 export default function App() {
   const socketRef = useRef<NotebookSocket | null>(null);
   const [ready, setReady] = useState(false);
+  const [kernelSpecs, setKernelSpecs] = useState<KernelSpec[]>([]);
+  const [kernelName, setKernelName] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("saved");
 
+  const revision = useStore((s) => s.revision);
+
+  // -- initial load: kernelspecs + document, then connect -------------- #
   useEffect(() => {
-    const socket = new NotebookSocket(NOTEBOOK_ID);
-    socket.connect();
-    socketRef.current = socket;
+    let cancelled = false;
+    (async () => {
+      let initialKernel: string | null = null;
+      try {
+        const specs = await loadKernelSpecs();
+        if (!cancelled) {
+          setKernelSpecs(specs.kernelspecs);
+          initialKernel = specs.default;
+          setKernelName(specs.default);
+        }
+      } catch {
+        /* kernelspecs are optional; picker just stays empty */
+      }
+      try {
+        const cells = await loadDocument(NOTEBOOK_ID);
+        if (!cancelled) useStore.getState().setCells(cells.length ? cells : [emptyCell("code")]);
+      } catch {
+        if (!cancelled) useStore.getState().setCells([emptyCell("code")]);
+      }
+      if (cancelled) return;
+      const socket = new NotebookSocket(NOTEBOOK_ID, initialKernel);
+      socketRef.current = socket;
+      socket.connect();
+      setReady(true);
+    })();
 
-    // Populate the editor from the starter notebook via the contents API,
-    // falling back to a single default cell if the server is unreachable.
-    fetch(`/api/contents/${NOTEBOOK_ID}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((nb: { cells?: RawCell[] }) => {
-        const cells = (nb.cells ?? [])
-          .filter((c) => c.cell_type === "code")
-          .map(toCellState);
-        useStore.getState().setCells(cells.length ? cells : [defaultCell()]);
-      })
-      .catch(() => useStore.getState().setCells([defaultCell()]))
-      .finally(() => setReady(true));
-
-    return () => socket.close();
+    return () => {
+      cancelled = true;
+      socketRef.current?.close();
+    };
   }, []);
+
+  // -- debounced autosave on persistable changes ----------------------- #
+  useEffect(() => {
+    if (!ready || revision === 0) return; // nothing edited yet
+    setSaveState("dirty");
+    const timer = window.setTimeout(async () => {
+      setSaveState("saving");
+      try {
+        await saveDocument(NOTEBOOK_ID, useStore.getState().cells);
+        setSaveState("saved");
+      } catch {
+        setSaveState("dirty");
+      }
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [revision, ready]);
+
+  const changeKernel = async (name: string) => {
+    if (name === kernelName) return;
+    // Switching kernels means a fresh session: drop the server session, then
+    // reconnect with the chosen kernelspec.
+    await fetch(`/api/kernels/${NOTEBOOK_ID}`, { method: "DELETE" }).catch(() => {});
+    socketRef.current?.close();
+    useStore.getState().setKernel("connecting", name);
+    const socket = new NotebookSocket(NOTEBOOK_ID, name);
+    socketRef.current = socket;
+    socket.connect();
+    setKernelName(name);
+  };
 
   if (!ready || !socketRef.current) {
     return <div className="loading">Loading…</div>;
   }
-  return <Notebook socket={socketRef.current} />;
+
+  return (
+    <>
+      <Toolbar
+        socket={socketRef.current}
+        kernelSpecs={kernelSpecs}
+        kernelName={kernelName}
+        onChangeKernel={changeKernel}
+        saveState={saveState}
+      />
+      <Notebook socket={socketRef.current} />
+    </>
+  );
 }

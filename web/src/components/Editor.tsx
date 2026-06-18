@@ -1,57 +1,118 @@
 import { useEffect, useRef } from "react";
-import { EditorState, Prec } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorState, Prec, type Extension } from "@codemirror/state";
+import { EditorView, keymap, type KeyBinding } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { python } from "@codemirror/lang-python";
-import { useStore } from "../lib/store";
+import { markdown } from "@codemirror/lang-markdown";
+import {
+  autocompletion,
+  type CompletionContext,
+  type CompletionResult,
+} from "@codemirror/autocomplete";
+import { useStore, type CellType } from "../lib/store";
+import type { NotebookSocket } from "../lib/ws";
 
 interface EditorProps {
   cellId: string;
+  cellType: CellType;
   initialValue: string;
+  socket: NotebookSocket;
   onRun: () => void;
+  onInspect?: (text: string | null) => void;
 }
 
-// A thin React wrapper around a CodeMirror 6 view. Edits are pushed into the
-// store on every change; Shift+Enter triggers the cell's run handler.
-export function Editor({ cellId, initialValue, onRun }: EditorProps) {
+function asString(v: unknown): string {
+  return typeof v === "string" ? v : Array.isArray(v) ? v.join("") : String(v ?? "");
+}
+
+// Async completion source backed by the kernel's complete_request.
+function kernelCompletions(socket: NotebookSocket) {
+  return async (ctx: CompletionContext): Promise<CompletionResult | null> => {
+    const word = ctx.matchBefore(/[\w.]+/);
+    if (!ctx.explicit && (!word || word.from === word.to)) return null;
+    try {
+      const reply = await socket.complete(ctx.state.doc.toString(), ctx.pos);
+      if (!reply.matches.length) return null;
+      return {
+        from: reply.cursor_start,
+        to: reply.cursor_end,
+        options: reply.matches.map((label) => ({ label })),
+        validFor: /^[\w.]*$/,
+      };
+    } catch {
+      return null;
+    }
+  };
+}
+
+export function Editor({
+  cellId,
+  cellType,
+  initialValue,
+  socket,
+  onRun,
+  onInspect,
+}: EditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
-  // Keep the latest onRun without re-creating the editor on every render.
   const onRunRef = useRef(onRun);
   onRunRef.current = onRun;
+  const onInspectRef = useRef(onInspect);
+  onInspectRef.current = onInspect;
 
   useEffect(() => {
     if (!hostRef.current) return;
 
-    const runKeymap = Prec.highest(
-      keymap.of([
-        {
-          key: "Shift-Enter",
-          run: () => {
-            onRunRef.current();
-            return true;
-          },
+    const keys: KeyBinding[] = [
+      { key: "Shift-Enter", run: () => (onRunRef.current(), true) },
+    ];
+    if (cellType === "code") {
+      // Shift-Tab: ask the kernel to inspect the symbol at the cursor.
+      keys.push({
+        key: "Shift-Tab",
+        run: (view: EditorView) => {
+          void (async () => {
+            try {
+              const reply = await socket.inspect(
+                view.state.doc.toString(),
+                view.state.selection.main.head,
+              );
+              onInspectRef.current?.(
+                reply.found ? asString(reply.data["text/plain"]) : null,
+              );
+            } catch {
+              onInspectRef.current?.(null);
+            }
+          })();
+          return true;
         },
-      ]),
-    );
+      });
+    }
 
-    const syncToStore = EditorView.updateListener.of((update) => {
-      if (update.docChanged) {
-        useStore.getState().setSource(cellId, update.state.doc.toString());
-      }
-    });
+    const extensions: Extension[] = [
+      Prec.highest(keymap.of(keys)),
+      basicSetup,
+      EditorView.updateListener.of((u) => {
+        if (u.docChanged) {
+          useStore.getState().setSource(cellId, u.state.doc.toString());
+        }
+      }),
+    ];
+    extensions.push(
+      cellType === "markdown"
+        ? markdown()
+        : python(),
+    );
+    if (cellType === "code") {
+      extensions.push(autocompletion({ override: [kernelCompletions(socket)] }));
+    }
 
     const view = new EditorView({
       parent: hostRef.current,
-      state: EditorState.create({
-        doc: initialValue,
-        extensions: [runKeymap, basicSetup, python(), syncToStore],
-      }),
+      state: EditorState.create({ doc: initialValue, extensions }),
     });
-
     return () => view.destroy();
-    // initialValue is the seed only; cellId identifies the editor instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cellId]);
+  }, [cellId, cellType]);
 
   return <div className="cm-host" ref={hostRef} />;
 }
