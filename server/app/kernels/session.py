@@ -240,6 +240,21 @@ class KernelSession:
             prefix = f"try:\n    del {name}\nexcept Exception:\n    pass\n"
         return self._run_variables(request_id, prefix + _VARIABLES_SCRIPT)
 
+    def set_variable(
+        self, request_id: str, name: str, value: bool | int | float | str
+    ) -> str:
+        """Bind a global to a scalar value (input blocks), then re-introspect.
+
+        Runs with ``store_history=False`` so it never advances the ``[n]`` prompt.
+        ``name`` is validated as an identifier and the value is emitted via
+        ``repr`` (a valid Python literal for str/bool/int/float), so neither can
+        inject code.
+        """
+        prefix = ""
+        if name.isidentifier():
+            prefix = f"{name} = {value!r}\n"
+        return self._run_variables(request_id, prefix + _VARIABLES_SCRIPT)
+
     # ----------------------------------------------------------------- #
     # comm protocol (ipywidgets): frontend -> kernel, on the shell channel
     # ----------------------------------------------------------------- #

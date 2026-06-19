@@ -313,6 +313,34 @@ try {
     .catch(() => false);
   check("sql block runs query", sqlOk, "");
 
+  // 12i) input block: a no-code control binds a kernel global usable from code.
+  await page.locator(".btn-add-input").click();
+  await page.evaluate(() => {
+    const st = window.__store.getState();
+    const cells = st.cells;
+    const inp = cells[cells.length - 1];
+    st.setCellMetadata(inp.id, {
+      input_type: "text",
+      var_name: "thresh",
+      value: "inp_tok_777",
+    });
+  });
+  await page.locator(".cell.input .run-btn").last().click(); // "Set"
+  await setSource(1, "print(thresh)");
+  await runAndWaitIdle(page.locator(".cell.code").first(), 1);
+  const inputOk = await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll(".cell.code .outputs")].some(
+          (el) => el.textContent && el.textContent.includes("inp_tok_777"),
+        ),
+      null,
+      { timeout: 15000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("input block binds variable", inputOk, "");
+
   // 13) export endpoints (.ipynb + HTML)
   const ipynbResp = await page.request.get(`${BASE}/api/contents/default/export/ipynb`);
   check(

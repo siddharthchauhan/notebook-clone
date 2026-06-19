@@ -188,6 +188,19 @@ export class NotebookSocket {
     });
   }
 
+  // Bind a global to a scalar (input blocks); resolves with the refreshed list.
+  setVariable(
+    name: string,
+    value: boolean | number | string,
+  ): Promise<VariablesReplyEvent> {
+    return this.request<VariablesReplyEvent>({
+      type: "set_variable_request",
+      request_id: crypto.randomUUID(),
+      name,
+      value,
+    });
+  }
+
   // --- comm protocol (ipywidgets), browser -> kernel; CommSink interface --- //
   commOpen(
     commId: string,

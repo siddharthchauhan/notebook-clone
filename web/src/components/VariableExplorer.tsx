@@ -38,6 +38,8 @@ export function VariableExplorer({ socket }: { socket: NotebookSocket }) {
   const ranToken = useStore((s) =>
     s.cells.reduce((sum, c) => sum + (c.execution_count ?? 0), 0),
   );
+  // Input blocks bind globals without advancing [n], so they signal refresh here.
+  const variablesRevision = useStore((s) => s.variablesRevision);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -53,7 +55,7 @@ export function VariableExplorer({ socket }: { socket: NotebookSocket }) {
 
   useEffect(() => {
     if (connected) void refresh();
-  }, [connected, ranToken, refresh]);
+  }, [connected, ranToken, variablesRevision, refresh]);
 
   const showInspect = async (name: string) => {
     if (inspect?.name === name) {

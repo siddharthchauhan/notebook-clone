@@ -19,16 +19,23 @@ interface NotebookDoc {
   metadata: Record<string, unknown>;
 }
 
+// Only code and SQL blocks run code and carry outputs; markdown/input don't.
+function hasOutputs(t: CellType): boolean {
+  return t === "code" || t === "sql";
+}
+
+function toCellType(t: string): CellType {
+  return t === "markdown" || t === "sql" || t === "input" ? t : "code";
+}
+
 export function documentToCells(doc: { cells?: DocCell[] }): CellState[] {
   return (doc.cells ?? []).map((c) => {
-    const cell_type: CellType =
-      c.cell_type === "markdown" ? "markdown" : c.cell_type === "sql" ? "sql" : "code";
+    const cell_type = toCellType(c.cell_type);
     return {
       id: c.id,
       cell_type,
       source: c.source ?? "",
-      // sql blocks produce outputs like code cells; only markdown has none.
-      outputs: cell_type !== "markdown" ? (c.outputs ?? []) : [],
+      outputs: hasOutputs(cell_type) ? (c.outputs ?? []) : [],
       execution_state: "idle",
       execution_count: c.execution_count ?? null,
       // Markdown loaded from disk starts rendered; empty markdown opens for edit.
@@ -44,7 +51,7 @@ function cellsToDocument(cells: CellState[]): NotebookDoc {
       id: c.id,
       cell_type: c.cell_type,
       source: c.source,
-      outputs: c.cell_type !== "markdown" ? c.outputs : [],
+      outputs: hasOutputs(c.cell_type) ? c.outputs : [],
       execution_count: c.execution_count,
       metadata: c.metadata ?? {},
     })),

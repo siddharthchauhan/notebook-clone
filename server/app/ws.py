@@ -35,6 +35,7 @@ from app.models import (
     KernelStatusEvent,
     RestartRequest,
     VariableChildrenRequest,
+    SetVariableRequest,
     VariablesRequest,
 )
 
@@ -101,6 +102,8 @@ async def _dispatch(session: KernelSession, request: ClientRequest) -> None:
         session.delete_variable(request.request_id, request.name)
     elif isinstance(request, VariableChildrenRequest):
         session.variable_children(request.request_id, request.name)
+    elif isinstance(request, SetVariableRequest):
+        session.set_variable(request.request_id, request.name, request.value)
     elif isinstance(request, CommOpenRequest):
         session.comm_open(
             request.comm_id,

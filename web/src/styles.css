@@ -756,6 +756,67 @@ select {
   padding: 4px 8px;
   white-space: pre-wrap;
 }
+/* input blocks (no-code controls bound to a kernel variable) */
+.input-block {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #fafbfe;
+}
+.input-config {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.input-type-select,
+.input-var,
+.input-options,
+.input-min,
+.input-max,
+.input-step {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.input-var {
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  width: 110px;
+}
+.input-min,
+.input-max,
+.input-step {
+  width: 64px;
+}
+.input-range-cfg {
+  display: inline-flex;
+  gap: 4px;
+}
+.input-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.input-slider {
+  flex: 1;
+  min-width: 0;
+}
+.input-text,
+.input-select {
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  min-width: 180px;
+}
+.input-value {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
 .output.widget {
   margin: 4px 0;
 }

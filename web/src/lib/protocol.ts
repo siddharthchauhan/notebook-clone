@@ -51,6 +51,13 @@ export interface VariableChildrenRequest {
   name: string;
 }
 
+export interface SetVariableRequest {
+  type: "set_variable_request";
+  request_id: string;
+  name: string;
+  value: boolean | number | string;
+}
+
 // ipywidgets comm messages, browser -> kernel. buffers are base64 strings.
 export interface CommOpenRequest {
   type: "comm_open_request";
@@ -83,6 +90,7 @@ export type ClientRequest =
   | VariablesRequest
   | DeleteVariableRequest
   | VariableChildrenRequest
+  | SetVariableRequest
   | CommOpenRequest
   | CommMsgRequest
   | CommCloseRequest;

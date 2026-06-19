@@ -75,9 +75,16 @@ back to the browser, **correctly correlated by cell**.
   all just work. It generalizes the cell model into a **block model**
   (code · markdown · sql); blocks persist as valid nbformat (a code cell tagged
   under `metadata.deepnote`), so the `.ipynb` still opens anywhere.
-- _Roadmap toward Deepnote parity_: input blocks (no-code slider/select/date →
-  variables), chart & big-number blocks, reactive execution (auto-re-run
-  dependents), an app/dashboard view, comments, and real-time collaboration.
+- **Input blocks**: no-code **text / slider / select / checkbox** controls, each
+  bound to a kernel global. Changing a control binds the variable (e.g.
+  `threshold = 42`) so any code cell can use it. Binding runs **silently**
+  (`store_history=False`, the same diverted channel as the variable explorer), so
+  it never advances the `[n]` prompt or leaks output — and the explorer refreshes
+  to show the new value. The value is sent as a JSON scalar and emitted server-side
+  via `repr`, so it can't inject code.
+- _Roadmap toward Deepnote parity_: reactive execution (auto-re-run blocks when an
+  input/dependency changes), chart & big-number blocks, an app/dashboard view,
+  comments, and real-time collaboration.
 
 ## Architecture
 
@@ -128,14 +135,14 @@ server/                FastAPI + jupyter_client backend (Python 3.12, uv)
     connectors/        data-source registry + /api/connectors (codegen)
     ws.py              /ws/{notebook_id}: attach, dispatch, detach
     main.py            app wiring, CORS, lifespan (shutdown_all)
-  tests/               62 pytest: Phase 1 criteria + persistence/interrupt/
+  tests/               64 pytest: Phase 1 criteria + persistence/interrupt/
                        restart/complete/inspect + document round-trip + WS +
                        AI (prompt/echo/status/SSE/chat) + variables + notebooks
                        + export + widgets (comm relay) + connectors + blocks
 web/                   Vite + React + TypeScript frontend
   src/
     lib/protocol.ts    TS mirror of models.py
-    lib/store.ts       zustand: block model (code/markdown/sql), autosave rev
+    lib/store.ts       zustand: block model (code/markdown/sql/input), autosave rev
     lib/ws.ts          WS client: reconnect + request/reply + comm relay
     lib/widgets.ts     live ipywidgets manager (@jupyter-widgets/html-manager)
     lib/connectors.ts  data-connector catalog + codegen REST helpers
@@ -145,7 +152,7 @@ web/                   Vite + React + TypeScript frontend
                        VariableExplorer, DataConnectors, AiChat, NotebookBrowser,
                        SidePanel,
                        outputs/ (rich MIME renderers)
-  e2e/run.mjs          Playwright smoke test of the live UI (27 checks)
+  e2e/run.mjs          Playwright smoke test of the live UI (28 checks)
 ```
 
 ## Quickstart
@@ -181,14 +188,14 @@ Shift+Tab on a symbol for docs.
 ## Verification
 
 ```bash
-cd server && uv run pytest        # 62 passed (headless, real kernel)
+cd server && uv run pytest        # 64 passed (headless, real kernel)
 
 cd web && npm run build           # typecheck + production build
 # Optional headless-browser smoke test. Start the server with
 # NBCLONE_AI_PROVIDER=echo so the AI flows run keyless; the e2e expects a fresh
 # starter, so clear server/notebooks/*.ipynb first if you've used the app:
 npx playwright install chromium
-npm run e2e                       # 27 checks, drives the real UI end-to-end
+npm run e2e                       # 28 checks, drives the real UI end-to-end
 ```
 
 The e2e check exercises markdown rendering, stdout, tracebacks, inline PNG,

@@ -8,19 +8,29 @@ export type Output =
   | { kind: "display"; data: Record<string, unknown>; metadata?: Record<string, unknown> }
   | { kind: "error"; ename: string; evalue: string; traceback: string[] };
 
-export type CellType = "code" | "markdown" | "sql";
+export type CellType = "code" | "markdown" | "sql" | "input";
 export type ExecutionState = "idle" | "busy" | "starting" | "queued";
 
 // Per-block config (Deepnote-style blocks). SQL blocks carry their connection
-// and target variable here; code/markdown leave it undefined.
+// and target variable; input blocks carry a control + the global they bind.
 export interface SqlConnection {
   type: "sqlite" | "sqlalchemy";
   db_path?: string;
   url?: string;
 }
+export type InputType = "text" | "slider" | "select" | "checkbox";
 export interface CellMetadata {
+  // sql block
   connection?: SqlConnection;
   result_var?: string;
+  // input block
+  input_type?: InputType;
+  var_name?: string;
+  value?: boolean | number | string;
+  options?: string[]; // select choices
+  min?: number;
+  max?: number;
+  step?: number;
   [k: string]: unknown;
 }
 
@@ -35,10 +45,14 @@ export interface CellState {
   metadata?: CellMetadata; // block config (e.g. SQL connection + result var)
 }
 
-// A fresh SQL block defaults to a SQLite connection writing into `df`.
+// Sensible starting config per block type (SQL → SQLite into `df`; input → a
+// 0–100 slider bound to `x`).
 function defaultMetadata(cell_type: CellType): CellMetadata | undefined {
   if (cell_type === "sql") {
     return { connection: { type: "sqlite", db_path: "" }, result_var: "df" };
+  }
+  if (cell_type === "input") {
+    return { input_type: "slider", var_name: "x", value: 50, min: 0, max: 100, step: 1 };
   }
   return undefined;
 }
@@ -71,8 +85,10 @@ interface NotebookStore {
   kernelName: string | null;
   aiAvailable: boolean; // whether the server has AI assist configured
   revision: number; // bumps on persistable changes; drives autosave
+  variablesRevision: number; // bumps when a binding changes the kernel silently
 
   setConnected: (connected: boolean) => void;
+  touchVariables: () => void;
   setKernel: (status: KernelStatus, name?: string | null) => void;
   setAiAvailable: (available: boolean) => void;
   setCells: (cells: CellState[]) => void;
@@ -105,8 +121,10 @@ export const useStore = create<NotebookStore>((set, get) => ({
   kernelName: null,
   aiAvailable: false,
   revision: 0,
+  variablesRevision: 0,
 
   setConnected: (connected) => set({ connected }),
+  touchVariables: () => set((s) => ({ variablesRevision: s.variablesRevision + 1 })),
   setKernel: (kernelStatus, name) =>
     set((s) => ({ kernelStatus, kernelName: name ?? s.kernelName })),
   setAiAvailable: (aiAvailable) => set({ aiAvailable }),

@@ -80,6 +80,19 @@ class VariableChildrenRequest(BaseModel):
     name: str
 
 
+class SetVariableRequest(BaseModel):
+    """Bind a global to a scalar value, then re-introspect (input blocks).
+
+    The value is a JSON scalar; the server turns it into a Python literal with
+    ``repr`` (so it can't inject) and the name is validated as an identifier.
+    """
+
+    type: Literal["set_variable_request"] = "set_variable_request"
+    request_id: str
+    name: str
+    value: bool | int | float | str
+
+
 # ipywidgets uses the Jupyter *comm* protocol: the frontend widget manager and
 # the kernel-side Widget objects sync state by exchanging comm messages. These
 # three carry a frontend-originated comm message to the kernel's shell channel.
@@ -118,6 +131,7 @@ ClientRequest = Annotated[
         VariablesRequest,
         DeleteVariableRequest,
         VariableChildrenRequest,
+        SetVariableRequest,
         CommOpenRequest,
         CommMsgRequest,
         CommCloseRequest,

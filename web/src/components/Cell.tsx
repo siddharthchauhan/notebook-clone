@@ -4,6 +4,7 @@ import {
   type CellMetadata,
   type CellState,
   type CellType,
+  type InputType,
   type SqlConnection,
 } from "../lib/store";
 import type { NotebookSocket } from "../lib/ws";
@@ -13,6 +14,27 @@ import { AiAssist } from "./AiAssist";
 import { generateConnectorCode } from "../lib/connectors";
 import { renderMarkdown } from "../lib/markdown";
 import { stripAnsi } from "../lib/ansi";
+
+// Only code and SQL blocks run code and show an [n] prompt + outputs.
+function isExecutable(t: CellType): boolean {
+  return t === "code" || t === "sql";
+}
+
+// Bind an input block's variable in the kernel from its current metadata. Runs
+// silently (store_history=False server-side), so it never advances [n]; we nudge
+// the variable explorer to refresh afterward.
+async function bindInput(cellId: string, socket: NotebookSocket) {
+  const cell = useStore.getState().cells.find((c) => c.id === cellId);
+  const m = (cell?.metadata ?? {}) as CellMetadata;
+  const name = (m.var_name ?? "").trim();
+  if (!name) return;
+  try {
+    await socket.setVariable(name, (m.value ?? "") as boolean | number | string);
+    useStore.getState().touchVariables();
+  } catch {
+    /* a failed bind is non-fatal; the next change retries */
+  }
+}
 
 export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocket }) {
   const cell = useStore((s) => s.cells.find((c) => c.id === cellId));
@@ -64,6 +86,10 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
       void runSql();
       return;
     }
+    if (latest.cell_type === "input") {
+      void bindInput(cellId, socket);
+      return;
+    }
     // Already running or waiting its turn — don't double-submit.
     if (latest.execution_state === "busy" || latest.execution_state === "queued") return;
     setInspect(null);
@@ -82,7 +108,9 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
           <SqlConfig cellId={cell.id} metadata={cell.metadata} />
         )}
 
-        {showRenderedMarkdown ? (
+        {cell.cell_type === "input" ? (
+          <InputBlock cellId={cell.id} metadata={cell.metadata} socket={socket} />
+        ) : showRenderedMarkdown ? (
           <div
             className="markdown-rendered"
             title="Double-click to edit"
@@ -113,7 +141,7 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
           </div>
         )}
 
-        {cell.cell_type !== "markdown" && (
+        {isExecutable(cell.cell_type) && (
           <OutputView outputs={cell.outputs} manager={socket.widgets} />
         )}
 
@@ -125,17 +153,10 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
 
 // The SQL block's connection picker + target-variable field. Editing updates the
 // cell's block metadata (persisted in the .ipynb under cell metadata).
-function SqlConfig({
-  cellId,
-  metadata,
-}: {
-  cellId: string;
-  metadata?: CellMetadata;
-}) {
+function SqlConfig({ cellId, metadata }: { cellId: string; metadata?: CellMetadata }) {
   const conn: SqlConnection = metadata?.connection ?? { type: "sqlite" };
   const resultVar = metadata?.result_var ?? "df";
-  const set = (patch: CellMetadata) =>
-    useStore.getState().setCellMetadata(cellId, patch);
+  const set = (patch: CellMetadata) => useStore.getState().setCellMetadata(cellId, patch);
 
   return (
     <div className="sql-config">
@@ -176,6 +197,164 @@ function SqlConfig({
   );
 }
 
+// A no-code input block: a control (text/slider/select/checkbox) bound to a
+// kernel global. Editing the control binds the variable immediately.
+function defaultValueFor(t: InputType): boolean | number | string {
+  if (t === "checkbox") return false;
+  if (t === "slider") return 0;
+  return "";
+}
+
+function InputBlock({
+  cellId,
+  metadata,
+  socket,
+}: {
+  cellId: string;
+  metadata?: CellMetadata;
+  socket: NotebookSocket;
+}) {
+  const m = metadata ?? {};
+  const inputType = (m.input_type ?? "text") as InputType;
+  const varName = m.var_name ?? "x";
+  const options = m.options ?? [];
+  const set = (patch: CellMetadata) => useStore.getState().setCellMetadata(cellId, patch);
+  // Update the metadata, then push the new value into the kernel.
+  const apply = (patch: CellMetadata) => {
+    set(patch);
+    void bindInput(cellId, socket);
+  };
+  const commit = () => void bindInput(cellId, socket);
+
+  let control: React.ReactNode;
+  if (inputType === "checkbox") {
+    control = (
+      <input
+        className="input-checkbox"
+        type="checkbox"
+        checked={Boolean(m.value)}
+        onChange={(e) => apply({ value: e.target.checked })}
+      />
+    );
+  } else if (inputType === "slider") {
+    control = (
+      <input
+        className="input-slider"
+        type="range"
+        min={m.min ?? 0}
+        max={m.max ?? 100}
+        step={m.step ?? 1}
+        value={Number(m.value ?? 0)}
+        onChange={(e) => set({ value: Number(e.target.value) })}
+        onMouseUp={commit}
+        onKeyUp={commit}
+      />
+    );
+  } else if (inputType === "select") {
+    control = (
+      <select
+        className="input-select"
+        value={String(m.value ?? "")}
+        onChange={(e) => apply({ value: e.target.value })}
+      >
+        <option value="">—</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    );
+  } else {
+    control = (
+      <input
+        className="input-text"
+        type="text"
+        value={String(m.value ?? "")}
+        onChange={(e) => set({ value: e.target.value })}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="input-block">
+      <div className="input-config">
+        <select
+          className="input-type-select"
+          value={inputType}
+          onChange={(e) => {
+            const next = e.target.value as InputType;
+            apply({ input_type: next, value: defaultValueFor(next) });
+          }}
+          title="Input type"
+        >
+          <option value="text">Text</option>
+          <option value="slider">Slider</option>
+          <option value="select">Select</option>
+          <option value="checkbox">Checkbox</option>
+        </select>
+        <input
+          className="input-var"
+          title="Variable name"
+          value={varName}
+          onChange={(e) => set({ var_name: e.target.value })}
+          onBlur={commit}
+        />
+        {inputType === "slider" && (
+          <span className="input-range-cfg">
+            <input
+              className="input-min"
+              type="number"
+              title="min"
+              value={m.min ?? 0}
+              onChange={(e) => set({ min: Number(e.target.value) })}
+            />
+            <input
+              className="input-max"
+              type="number"
+              title="max"
+              value={m.max ?? 100}
+              onChange={(e) => set({ max: Number(e.target.value) })}
+            />
+            <input
+              className="input-step"
+              type="number"
+              title="step"
+              value={m.step ?? 1}
+              onChange={(e) => set({ step: Number(e.target.value) })}
+            />
+          </span>
+        )}
+        {inputType === "select" && (
+          <input
+            className="input-options"
+            placeholder="comma, separated, options"
+            value={options.join(", ")}
+            onChange={(e) =>
+              set({
+                options: e.target.value
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+        )}
+      </div>
+      <div className="input-control">
+        {control}
+        <code className="input-value">
+          {varName} = {JSON.stringify(m.value ?? null)}
+        </code>
+      </div>
+    </div>
+  );
+}
+
 function CellToolbar({ cell, onRun }: { cell: CellState; onRun: () => void }) {
   const { addCell, deleteCell, moveCell, setCellType } = useStore.getState();
 
@@ -186,19 +365,23 @@ function CellToolbar({ cell, onRun }: { cell: CellState; onRun: () => void }) {
   const runLabel =
     cell.cell_type === "markdown"
       ? "▶ Render"
-      : busy
-        ? "Running…"
-        : queued
-          ? "Queued…"
-          : "▶ Run";
+      : cell.cell_type === "input"
+        ? "Set"
+        : busy
+          ? "Running…"
+          : queued
+            ? "Queued…"
+            : "▶ Run";
 
   return (
     <div className="cell-toolbar">
       <button className="run-btn" onClick={onRun} disabled={pending}>
         {runLabel}
       </button>
-      {cell.cell_type !== "markdown" && (
-        <span className="prompt">{pending ? "[*]" : cell.execution_count != null ? `[${cell.execution_count}]` : "[ ]"}</span>
+      {isExecutable(cell.cell_type) && (
+        <span className="prompt">
+          {pending ? "[*]" : cell.execution_count != null ? `[${cell.execution_count}]` : "[ ]"}
+        </span>
       )}
       {busy && <span className="spinner" role="status" aria-label="busy" />}
       {queued && <span className="queued-tag">queued</span>}
@@ -212,6 +395,7 @@ function CellToolbar({ cell, onRun }: { cell: CellState; onRun: () => void }) {
         <option value="code">Code</option>
         <option value="markdown">Markdown</option>
         <option value="sql">SQL</option>
+        <option value="input">Input</option>
       </select>
       <button onClick={() => moveCell(cell.id, -1)} title="Move up">
         ↑

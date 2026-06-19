@@ -79,6 +79,7 @@ export function Toolbar({
         <button onClick={() => socket.restart()} title="Restart the kernel">⟳ Restart</button>
         <button onClick={() => useStore.getState().addCell(null, "code")} title="Add a code cell">+ Cell</button>
         <button className="btn-add-sql" onClick={() => useStore.getState().addCell(null, "sql")} title="Add a SQL block">+ SQL</button>
+        <button className="btn-add-input" onClick={() => useStore.getState().addCell(null, "input")} title="Add an input block">+ Input</button>
       </div>
 
       <div className="toolbar-group">

@@ -63,6 +63,45 @@ async def test_delete_variable_rejects_non_identifier(kernel):
     assert "x" in {v["name"] for v in reply["variables"]}
 
 
+async def test_set_variable_binds_value_and_returns_variables(kernel):
+    """Input blocks bind a scalar to a global; it shows up in the explorer and
+    is usable from a normal cell — without advancing the [n] prompt."""
+    session, collector = kernel
+
+    session.set_variable("s1", "threshold", 42)
+    reply = await collector.wait_event(
+        lambda e: e.get("type") == "variables_reply" and e.get("request_id") == "s1"
+    )
+    by_name = {v["name"]: v for v in reply["variables"]}
+    assert by_name["threshold"]["type"] == "int"
+
+    # The bound value is real state the kernel can compute with.
+    session.execute("c1", "print(threshold * 2)")
+    out = await collector.wait_event(
+        lambda e: e.get("type") == "stream" and e.get("cell_id") == "c1"
+    )
+    assert "84" in out["text"]
+
+
+async def test_set_variable_quotes_strings_and_rejects_bad_name(kernel):
+    """A string value is emitted as a literal (no injection), and a non-identifier
+    name binds nothing."""
+    session, collector = kernel
+
+    session.set_variable("s2", "label", "a'b; import os")
+    reply = await collector.wait_event(
+        lambda e: e.get("type") == "variables_reply" and e.get("request_id") == "s2"
+    )
+    by_name = {v["name"]: v for v in reply["variables"]}
+    assert by_name["label"]["type"] == "str"
+
+    session.set_variable("s3", "bad name", 1)
+    reply = await collector.wait_event(
+        lambda e: e.get("type") == "variables_reply" and e.get("request_id") == "s3"
+    )
+    assert "bad" not in {v["name"] for v in reply["variables"]}
+
+
 async def test_variable_children_lists_dict_items(kernel):
     session, collector = kernel
     session.execute("c1", "m = {'a': 1, 'b': 2}")
