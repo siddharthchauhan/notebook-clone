@@ -64,6 +64,11 @@ export interface ColumnsRequest {
   name: string;
 }
 
+export interface DocOpRequest {
+  type: "doc_op_request";
+  op: Record<string, unknown>;
+}
+
 // ipywidgets comm messages, browser -> kernel. buffers are base64 strings.
 export interface CommOpenRequest {
   type: "comm_open_request";
@@ -98,6 +103,7 @@ export type ClientRequest =
   | VariableChildrenRequest
   | SetVariableRequest
   | ColumnsRequest
+  | DocOpRequest
   | CommOpenRequest
   | CommMsgRequest
   | CommCloseRequest;
@@ -202,6 +208,22 @@ export interface ColumnsReplyEvent {
   columns: string[];
 }
 
+export interface PeerInfo {
+  client_id: string;
+  name: string;
+  color: string;
+}
+
+export interface DocOpEvent {
+  type: "doc_op";
+  op: Record<string, unknown>;
+}
+
+export interface PresenceEvent {
+  type: "presence";
+  peers: PeerInfo[];
+}
+
 // ipywidgets comm messages, kernel -> browser. buffers are base64 strings.
 export interface CommOpenEvent {
   type: "comm_open";
@@ -238,6 +260,8 @@ export type ClientEvent =
   | VariablesReplyEvent
   | VariableChildrenReplyEvent
   | ColumnsReplyEvent
+  | DocOpEvent
+  | PresenceEvent
   | CommOpenEvent
   | CommMsgEvent
   | CommCloseEvent;

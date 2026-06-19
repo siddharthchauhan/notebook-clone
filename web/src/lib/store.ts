@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { ClientEvent } from "./protocol";
+import type { CommentT } from "./comments";
 
 // Output shape is identical to the server "document" output shape, so loading
 // and autosaving are direct pass-throughs (see lib/document.ts).
@@ -53,7 +54,26 @@ export interface CellState {
   execution_count: number | null;
   rendered: boolean; // markdown cells: showing the rendered view vs. editor
   metadata?: CellMetadata; // block config (e.g. SQL connection + result var)
+  remoteEpoch?: number; // bumps when a collaborator edits this cell's source
 }
+
+// One collaborator on a notebook (presence roster).
+export interface Peer {
+  client_id: string;
+  name: string;
+  color: string;
+}
+
+// A document edit broadcast to collaborators. The server relays these opaquely;
+// only the client interprets them (see applyRemoteOp).
+export type DocOp =
+  | { op: "source"; cell_id: string; source: string }
+  | { op: "add"; after_id: string | null; cell: CellState }
+  | { op: "delete"; cell_id: string }
+  | { op: "move"; cell_id: string; dir: -1 | 1 }
+  | { op: "type"; cell_id: string; cell_type: CellType }
+  | { op: "metadata"; cell_id: string; patch: CellMetadata }
+  | { op: "rendered"; cell_id: string; rendered: boolean };
 
 // Sensible starting config per block type (SQL → SQLite into `df`; input → a
 // 0–100 slider bound to `x`).
@@ -104,10 +124,22 @@ interface NotebookStore {
   variablesRevision: number; // bumps when a binding changes the kernel silently
   reactive: boolean; // when on, a block's dependents re-run after it changes
   appMode: boolean; // presentation view: hide code/chrome, show outputs + inputs
+  autoRunMs: number; // 0 = off; otherwise run-all on this interval (live dashboards)
+  notebookId: string; // current notebook (also used by comment REST calls)
+  comments: Record<string, CommentT[]>; // per-cell threads, keyed by cell id
+  peers: Peer[]; // other collaborators currently on this notebook
 
   setConnected: (connected: boolean) => void;
+  setPeers: (peers: Peer[]) => void;
+  setBroadcaster: (fn: ((op: DocOp) => void) | null) => void;
+  applyRemoteOp: (op: DocOp) => void;
   setReactive: (reactive: boolean) => void;
   setAppMode: (appMode: boolean) => void;
+  setAutoRunMs: (ms: number) => void;
+  setNotebookId: (id: string) => void;
+  setComments: (comments: Record<string, CommentT[]>) => void;
+  addCommentLocal: (comment: CommentT) => void;
+  removeCommentLocal: (commentId: string) => void;
   touchVariables: () => void;
   setKernel: (status: KernelStatus, name?: string | null) => void;
   setAiAvailable: (available: boolean) => void;
@@ -134,6 +166,15 @@ function mapCell(
   return cells.map((c) => (c.id === cellId ? fn(c) : c));
 }
 
+// Collaboration: doc edits are broadcast to peers via this hook (set by the app
+// once the socket is up). `applyingRemote` guards against echoing a remote edit
+// straight back out as a local one.
+let _broadcaster: ((op: DocOp) => void) | null = null;
+let applyingRemote = false;
+function emit(op: DocOp): void {
+  if (!applyingRemote) _broadcaster?.(op);
+}
+
 export const useStore = create<NotebookStore>((set, get) => ({
   cells: [],
   connected: false,
@@ -144,11 +185,86 @@ export const useStore = create<NotebookStore>((set, get) => ({
   variablesRevision: 0,
   reactive: false,
   appMode: false,
+  autoRunMs: 0,
+  notebookId: "default",
+  comments: {},
+  peers: [],
 
   setConnected: (connected) => set({ connected }),
+  setPeers: (peers) => set({ peers }),
+  setBroadcaster: (fn) => {
+    _broadcaster = fn;
+  },
+
+  // Apply a collaborator's edit without re-broadcasting it. Source edits bump the
+  // cell's remoteEpoch so a non-focused editor knows to refresh its text.
+  applyRemoteOp: (op) => {
+    applyingRemote = true;
+    try {
+      const s = get();
+      switch (op.op) {
+        case "source":
+          s.setSource(op.cell_id, op.source);
+          set((st) => ({
+            cells: mapCell(st.cells, op.cell_id, (c) => ({
+              ...c,
+              remoteEpoch: (c.remoteEpoch ?? 0) + 1,
+            })),
+          }));
+          break;
+        case "add":
+          set((st) => {
+            if (st.cells.some((c) => c.id === op.cell.id)) return {} as Partial<NotebookStore>;
+            const idx = op.after_id ? st.cells.findIndex((c) => c.id === op.after_id) : -1;
+            const at = idx === -1 ? st.cells.length : idx + 1;
+            return {
+              cells: [...st.cells.slice(0, at), op.cell, ...st.cells.slice(at)],
+              revision: st.revision + 1,
+            };
+          });
+          break;
+        case "delete":
+          s.deleteCell(op.cell_id);
+          break;
+        case "move":
+          s.moveCell(op.cell_id, op.dir);
+          break;
+        case "type":
+          s.setCellType(op.cell_id, op.cell_type);
+          break;
+        case "metadata":
+          s.setCellMetadata(op.cell_id, op.patch);
+          break;
+        case "rendered":
+          s.setRendered(op.cell_id, op.rendered);
+          break;
+      }
+    } finally {
+      applyingRemote = false;
+    }
+  },
   setReactive: (reactive) => set({ reactive }),
   // Entering app view turns on reactivity so inputs drive the dashboard live.
   setAppMode: (appMode) => set((s) => ({ appMode, reactive: appMode || s.reactive })),
+  setAutoRunMs: (autoRunMs) => set({ autoRunMs }),
+  setNotebookId: (notebookId) => set({ notebookId }),
+  setComments: (comments) => set({ comments }),
+  addCommentLocal: (comment) =>
+    set((s) => ({
+      comments: {
+        ...s.comments,
+        [comment.cell_id]: [...(s.comments[comment.cell_id] ?? []), comment],
+      },
+    })),
+  removeCommentLocal: (commentId) =>
+    set((s) => {
+      const next: Record<string, CommentT[]> = {};
+      for (const [cid, list] of Object.entries(s.comments)) {
+        const kept = list.filter((c) => c.id !== commentId);
+        if (kept.length) next[cid] = kept;
+      }
+      return { comments: next };
+    }),
   touchVariables: () => set((s) => ({ variablesRevision: s.variablesRevision + 1 })),
   setKernel: (kernelStatus, name) =>
     set((s) => ({ kernelStatus, kernelName: name ?? s.kernelName })),
@@ -158,11 +274,13 @@ export const useStore = create<NotebookStore>((set, get) => ({
   // re-save freshly loaded content.
   setCells: (cells) => set({ cells, revision: 0 }),
 
-  setSource: (cellId, source) =>
+  setSource: (cellId, source) => {
     set((s) => ({
       cells: mapCell(s.cells, cellId, (c) => ({ ...c, source })),
       revision: s.revision + 1,
-    })),
+    }));
+    emit({ op: "source", cell_id: cellId, source });
+  },
 
   addCell: (afterId, cell_type, source = "") => {
     const cell = emptyCell(cell_type, source);
@@ -172,16 +290,19 @@ export const useStore = create<NotebookStore>((set, get) => ({
       const cells = [...s.cells.slice(0, at), cell, ...s.cells.slice(at)];
       return { cells, revision: s.revision + 1 };
     });
+    emit({ op: "add", after_id: afterId, cell });
     return cell.id;
   },
 
-  deleteCell: (cellId) =>
+  deleteCell: (cellId) => {
     set((s) => ({
       cells: s.cells.filter((c) => c.id !== cellId),
       revision: s.revision + 1,
-    })),
+    }));
+    emit({ op: "delete", cell_id: cellId });
+  },
 
-  moveCell: (cellId, dir) =>
+  moveCell: (cellId, dir) => {
     set((s) => {
       const idx = s.cells.findIndex((c) => c.id === cellId);
       const target = idx + dir;
@@ -189,9 +310,11 @@ export const useStore = create<NotebookStore>((set, get) => ({
       const cells = [...s.cells];
       [cells[idx], cells[target]] = [cells[target], cells[idx]];
       return { cells, revision: s.revision + 1 };
-    }),
+    });
+    emit({ op: "move", cell_id: cellId, dir });
+  },
 
-  setCellType: (cellId, cell_type) =>
+  setCellType: (cellId, cell_type) => {
     set((s) => ({
       cells: mapCell(s.cells, cellId, (c) => ({
         ...c,
@@ -202,19 +325,25 @@ export const useStore = create<NotebookStore>((set, get) => ({
         metadata: c.metadata ?? defaultMetadata(cell_type),
       })),
       revision: s.revision + 1,
-    })),
+    }));
+    emit({ op: "type", cell_id: cellId, cell_type });
+  },
 
-  setCellMetadata: (cellId, patch) =>
+  setCellMetadata: (cellId, patch) => {
     set((s) => ({
       cells: mapCell(s.cells, cellId, (c) => ({
         ...c,
         metadata: { ...(c.metadata ?? {}), ...patch },
       })),
       revision: s.revision + 1,
-    })),
+    }));
+    emit({ op: "metadata", cell_id: cellId, patch });
+  },
 
-  setRendered: (cellId, rendered) =>
-    set((s) => ({ cells: mapCell(s.cells, cellId, (c) => ({ ...c, rendered })) })),
+  setRendered: (cellId, rendered) => {
+    set((s) => ({ cells: mapCell(s.cells, cellId, (c) => ({ ...c, rendered })) }));
+    emit({ op: "rendered", cell_id: cellId, rendered });
+  },
 
   clearOutputs: (cellId) =>
     set((s) => ({
@@ -245,6 +374,8 @@ export const useStore = create<NotebookStore>((set, get) => ({
       return;
     // ipywidgets comm events are handled by the widget manager (see ws.ts),
     // never the cell store.
+    // Collaboration events are handled in ws.ts (applyRemoteOp / setPeers).
+    if (event.type === "doc_op" || event.type === "presence") return;
     if (
       event.type === "comm_open" ||
       event.type === "comm_msg" ||

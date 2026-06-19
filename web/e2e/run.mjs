@@ -466,6 +466,46 @@ try {
     .catch(() => false);
   check("kpi block renders a metric", kpiOk, "");
 
+  // 12n) collaboration: a second viewer sees presence + live edits.
+  const page2 = await browser.newPage();
+  await page2.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page2.waitForFunction(
+    () => !!window.__store && window.__store.getState().connected,
+    null,
+    { timeout: 15000 },
+  );
+  const peersGte2 = (p) =>
+    p
+      .waitForFunction(() => window.__store.getState().peers.length >= 2, null, {
+        timeout: 10000,
+      })
+      .then(() => true)
+      .catch(() => false);
+  const [presenceOk, presenceOk2] = await Promise.all([peersGte2(page), peersGte2(page2)]);
+  check("presence shows both viewers", presenceOk && presenceOk2, "");
+
+  // Edit on page 1; the new cell + its text should appear on page 2 live.
+  const collabTok = "collab_tok_" + Date.now();
+  const collabId = await page.evaluate((t) => {
+    const st = window.__store.getState();
+    const id = st.addCell(null, "code", "");
+    st.setSource(id, "# " + t);
+    return id;
+  }, collabTok);
+  const syncedOk = await page2
+    .waitForFunction(
+      ([id, t]) => {
+        const c = window.__store.getState().cells.find((x) => x.id === id);
+        return !!c && c.source.includes(t);
+      },
+      [collabId, collabTok],
+      { timeout: 10000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("edits sync to the other viewer", syncedOk, "");
+  await page2.close();
+
   // 13) export endpoints (.ipynb + HTML)
   const ipynbResp = await page.request.get(`${BASE}/api/contents/default/export/ipynb`);
   check(

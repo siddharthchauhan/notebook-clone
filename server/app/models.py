@@ -101,6 +101,17 @@ class ColumnsRequest(BaseModel):
     name: str
 
 
+class DocOpRequest(BaseModel):
+    """A document edit to relay to collaborators on the same notebook.
+
+    The ``op`` is opaque to the server — it just fans it out to the other
+    attached sockets; only the client interprets it (see the store's applyRemoteOp).
+    """
+
+    type: Literal["doc_op_request"] = "doc_op_request"
+    op: dict[str, Any]
+
+
 # ipywidgets uses the Jupyter *comm* protocol: the frontend widget manager and
 # the kernel-side Widget objects sync state by exchanging comm messages. These
 # three carry a frontend-originated comm message to the kernel's shell channel.
@@ -141,6 +152,7 @@ ClientRequest = Annotated[
         VariableChildrenRequest,
         SetVariableRequest,
         ColumnsRequest,
+        DocOpRequest,
         CommOpenRequest,
         CommMsgRequest,
         CommCloseRequest,
@@ -257,6 +269,20 @@ class ColumnsReplyEvent(BaseModel):
     columns: list[str]
 
 
+class DocOpEvent(BaseModel):
+    """A collaborator's document edit, relayed to the other attached sockets."""
+
+    type: Literal["doc_op"] = "doc_op"
+    op: dict[str, Any]
+
+
+class PresenceEvent(BaseModel):
+    """The current collaborators on a notebook: ``{client_id, name, color}`` each."""
+
+    type: Literal["presence"] = "presence"
+    peers: list[dict[str, Any]]
+
+
 # Kernel-originated comm messages (ipywidgets). These are *not* cell-scoped — a
 # widget model is global and may update from any cell's interaction — so they
 # broadcast to every attached socket and are routed by ``comm_id`` in the
@@ -299,6 +325,8 @@ ClientEvent = Annotated[
         VariablesReplyEvent,
         VariableChildrenReplyEvent,
         ColumnsReplyEvent,
+        DocOpEvent,
+        PresenceEvent,
         CommOpenEvent,
         CommMsgEvent,
         CommCloseEvent,

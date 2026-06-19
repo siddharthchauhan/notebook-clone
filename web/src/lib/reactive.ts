@@ -6,10 +6,8 @@
 // downstream of A when B reads a name A writes — computed transitively, in
 // notebook order, so a chain A → B → C re-runs in order.
 
-import { generateConnectorCode } from "./connectors";
-import { generateChartCode } from "./charts";
-import { generateKpiCode } from "./kpi";
 import { useStore, type CellState, type CellMetadata } from "./store";
+import { compileBlockCode } from "./run";
 import type { NotebookSocket } from "./ws";
 
 export interface Deps {
@@ -95,53 +93,6 @@ export function downstreamOf(
   return out;
 }
 
-// The Python to execute for a block (code as-is; SQL compiled via connectors).
-async function codeForCell(c: CellState): Promise<string | null> {
-  if (c.cell_type === "code") return c.source;
-  if (c.cell_type === "sql") {
-    const m = (c.metadata ?? {}) as CellMetadata;
-    const conn = m.connection ?? { type: "sqlite" as const };
-    const params: Record<string, string> = { query: c.source, var: m.result_var || "df" };
-    if (conn.type === "sqlalchemy") params.url = conn.url ?? "";
-    else params.db_path = conn.db_path ?? "";
-    try {
-      return await generateConnectorCode(
-        conn.type === "sqlalchemy" ? "sqlalchemy" : "sqlite",
-        params,
-      );
-    } catch {
-      return null;
-    }
-  }
-  if (c.cell_type === "chart") {
-    const m = (c.metadata ?? {}) as CellMetadata;
-    try {
-      return await generateChartCode({
-        df: m.df ?? "",
-        chart_type: m.chart_type ?? "line",
-        x: m.x ?? "",
-        y: m.y ?? "",
-        title: m.title ?? "",
-      });
-    } catch {
-      return null;
-    }
-  }
-  if (c.cell_type === "kpi") {
-    const m = (c.metadata ?? {}) as CellMetadata;
-    try {
-      return await generateKpiCode({
-        expression: m.expression ?? "",
-        label: m.label ?? "",
-        number_format: m.number_format ?? "",
-      });
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
 // Re-run everything downstream of `changedId` (no-op unless reactive mode is on).
 // Cells are enqueued in notebook order; the kernel runs the shell channel FIFO,
 // so the just-triggered block lands before its dependents.
@@ -156,7 +107,7 @@ export async function reactiveRerun(
   for (const id of ids) {
     const cell = useStore.getState().cells.find((c) => c.id === id);
     if (!cell) continue;
-    const code = await codeForCell(cell);
+    const code = await compileBlockCode(cell);
     if (code == null) continue;
     const st = useStore.getState();
     st.clearOutputs(id);

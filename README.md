@@ -113,8 +113,24 @@ back to the browser, **correctly correlated by cell**.
   Entering app view turns reactivity on, so moving a slider re-runs its dependents
   and the dashboard updates live. Output-less cells are simply hidden. It's a pure
   view over the same notebook — toggle back and every editor returns untouched.
-- _Roadmap toward Deepnote parity_: scheduled runs,
-  comments, and real-time collaboration.
+
+**Phase 7 — collaboration & live apps**
+
+- **Real-time collaboration**: open the same notebook in two places and edit
+  together. The per-notebook WebSocket relays document edits (`doc_op`) to the
+  *other* attached sockets — add/delete/move/type/metadata and per-cell source —
+  applied remotely without echoing back; a focused editor is never overwritten
+  (last-writer-wins, but your cursor is safe). A **presence** roster (server-
+  assigned id + color per socket) shows who else is viewing. Cell outputs already
+  fan out to every socket on the spine, so a run is seen by everyone.
+- **Comments**: per-cell threads (💬 with a count), stored as a JSON sidecar
+  (`notebooks/.comments/<id>.json`) — collaboration metadata kept out of the
+  `.ipynb` so exports stay clean. Add / delete, persisted across reloads.
+- **Scheduled runs**: an **Auto-run** control (off / 5s / 30s / 1m) re-runs the
+  whole notebook on an interval — turn it on in app view for a live dashboard that
+  refreshes itself.
+- _Remaining toward full Deepnote parity_: conflict-free (CRDT) merge for
+  simultaneous edits to the same cell, and auth/sharing.
 
 ## Architecture
 
@@ -166,9 +182,10 @@ server/                FastAPI + jupyter_client backend (Python 3.12, uv)
     analysis.py        AST read/write analysis + /api/analyze (reactive deps)
     charts.py          no-code chart spec -> matplotlib (/api/charts)
     kpi.py             big-number block: expression -> HTML (/api/kpi)
+    comments.py        per-cell comment threads (JSON sidecar + REST)
     ws.py              /ws/{notebook_id}: attach, dispatch, detach
     main.py            app wiring, CORS, lifespan (shutdown_all)
-  tests/               82 pytest: Phase 1 criteria + persistence/interrupt/
+  tests/               88 pytest: Phase 1 criteria + persistence/interrupt/
                        restart/complete/inspect + document round-trip + WS +
                        AI (prompt/echo/status/SSE/chat) + variables + notebooks
                        + export + widgets (comm relay) + connectors + blocks
@@ -182,13 +199,15 @@ web/                   Vite + React + TypeScript frontend
     lib/charts.ts      chart-spec -> matplotlib codegen REST helper
     lib/kpi.ts         KPI-spec -> big-number codegen REST helper
     lib/reactive.ts    dependency graph + reactive re-run orchestration
+    lib/run.ts         shared block compile + run-all (also scheduled runs)
+    lib/comments.ts    per-cell comment REST helpers
     lib/document.ts    document, kernelspecs, notebooks, export REST helpers
     lib/ai.ts          AI status + SSE-over-fetch streamer (complete + chat)
     components/        Editor, Cell, Toolbar, AiAssist (per-cell ✨ AI),
                        VariableExplorer, DataConnectors, AiChat, NotebookBrowser,
                        SidePanel,
                        outputs/ (rich MIME renderers)
-  e2e/run.mjs          Playwright smoke test of the live UI (33 checks)
+  e2e/run.mjs          Playwright smoke test of the live UI (35 checks)
 ```
 
 ## Quickstart
@@ -224,14 +243,14 @@ Shift+Tab on a symbol for docs.
 ## Verification
 
 ```bash
-cd server && uv run pytest        # 82 passed (headless, real kernel)
+cd server && uv run pytest        # 88 passed (headless, real kernel)
 
 cd web && npm run build           # typecheck + production build
 # Optional headless-browser smoke test. Start the server with
 # NBCLONE_AI_PROVIDER=echo so the AI flows run keyless; the e2e expects a fresh
 # starter, so clear server/notebooks/*.ipynb first if you've used the app:
 npx playwright install chromium
-npm run e2e                       # 33 checks, drives the real UI end-to-end
+npm run e2e                       # 35 checks, drives the real UI end-to-end
 ```
 
 The e2e check exercises markdown rendering, stdout, tracebacks, inline PNG,

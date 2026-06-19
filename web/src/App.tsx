@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NotebookSocket } from "./lib/ws";
 import { useStore, emptyCell } from "./lib/store";
+import { runAllCells } from "./lib/run";
 import { Notebook } from "./Notebook";
 import { Toolbar } from "./components/Toolbar";
 import { NotebookBrowser } from "./components/NotebookBrowser";
@@ -17,6 +18,7 @@ import {
   type KernelSpec,
 } from "./lib/document";
 import { aiStatus } from "./lib/ai";
+import { listComments, getAuthor } from "./lib/comments";
 
 type SaveState = "saved" | "saving" | "dirty";
 
@@ -32,6 +34,13 @@ export default function App() {
   const [panel, setPanel] = useState<PanelTab | null>(null);
 
   const revision = useStore((s) => s.revision);
+  const autoRunMs = useStore((s) => s.autoRunMs);
+
+  // Doc edits broadcast to collaborators through whatever socket is live now.
+  useEffect(() => {
+    useStore.getState().setBroadcaster((op) => socketRef.current?.docOp(op));
+    return () => useStore.getState().setBroadcaster(null);
+  }, []);
 
   const refreshCheckpoints = async () => {
     try {
@@ -46,6 +55,8 @@ export default function App() {
     let cancelled = false;
     setReady(false);
     socketRef.current?.close();
+    useStore.getState().setNotebookId(notebookId);
+    useStore.getState().setComments({});
     (async () => {
       let initialKernel: string | null = kernelName;
       try {
@@ -65,11 +76,14 @@ export default function App() {
         if (!cancelled) useStore.getState().setCells([emptyCell("code")]);
       }
       if (cancelled) return;
-      const socket = new NotebookSocket(notebookId, initialKernel);
+      const socket = new NotebookSocket(notebookId, initialKernel, getAuthor());
       socketRef.current = socket;
       socket.connect();
       setReady(true);
       void refreshCheckpoints();
+      void listComments(notebookId)
+        .then((c) => !cancelled && useStore.getState().setComments(c))
+        .catch(() => {});
       void aiStatus()
         .then((s) => !cancelled && useStore.getState().setAiAvailable(s.available))
         .catch(() => {});
@@ -98,6 +112,15 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [revision, ready, notebookId]);
 
+  // -- scheduled runs: re-run the whole notebook on an interval (live apps) -- #
+  useEffect(() => {
+    if (!ready || autoRunMs <= 0) return;
+    const timer = window.setInterval(() => {
+      if (socketRef.current) void runAllCells(socketRef.current);
+    }, autoRunMs);
+    return () => window.clearInterval(timer);
+  }, [autoRunMs, ready, notebookId]);
+
   const changeKernel = async (name: string) => {
     if (name === kernelName) return;
     // Switching kernels means a fresh session: drop the server session, then
@@ -105,7 +128,7 @@ export default function App() {
     await fetch(`/api/kernels/${notebookId}`, { method: "DELETE" }).catch(() => {});
     socketRef.current?.close();
     useStore.getState().setKernel("connecting", name);
-    const socket = new NotebookSocket(notebookId, name);
+    const socket = new NotebookSocket(notebookId, name, getAuthor());
     socketRef.current = socket;
     socket.connect();
     setKernelName(name);

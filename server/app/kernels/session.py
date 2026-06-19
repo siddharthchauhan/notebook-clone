@@ -145,6 +145,8 @@ class KernelSession:
         self.var_buffers: dict[str, str] = {}
 
         self._subscribers: set[Subscriber] = set()
+        # Collaboration presence: each subscriber's {client_id, name, color}.
+        self._presence: dict[Subscriber, dict] = {}
         self._iopub_task: asyncio.Task | None = None
         self._shell_task: asyncio.Task | None = None
 
@@ -179,15 +181,21 @@ class KernelSession:
     # ----------------------------------------------------------------- #
     # subscribers / broadcast
     # ----------------------------------------------------------------- #
-    def subscribe(self, cb: Subscriber) -> None:
+    def subscribe(self, cb: Subscriber, presence: dict | None = None) -> None:
         self._subscribers.add(cb)
+        if presence is not None:
+            self._presence[cb] = presence
 
     def unsubscribe(self, cb: Subscriber) -> None:
         self._subscribers.discard(cb)
+        self._presence.pop(cb, None)
 
     @property
     def subscriber_count(self) -> int:
         return len(self._subscribers)
+
+    def presence_roster(self) -> list[dict]:
+        return list(self._presence.values())
 
     async def _broadcast(self, event: dict) -> None:
         """Fan one event out to every attached socket, dropping dead ones."""
@@ -198,6 +206,22 @@ class KernelSession:
                 # A send failure means the socket is gone; its handler also
                 # unsubscribes in its finally, but drop it now to be safe.
                 self._subscribers.discard(cb)
+
+    async def relay(self, event: dict, exclude: Subscriber | None = None) -> None:
+        """Fan an event out to every socket *except* the sender (collaboration)."""
+        for cb in list(self._subscribers):
+            if cb is exclude:
+                continue
+            try:
+                await cb(event)
+            except Exception:
+                self._subscribers.discard(cb)
+
+    async def broadcast_presence(self) -> None:
+        """Tell everyone who is currently attached to this notebook."""
+        from app.models import PresenceEvent
+
+        await self._broadcast(PresenceEvent(peers=self.presence_roster()).model_dump())
 
     # ----------------------------------------------------------------- #
     # requests (all sync kc calls returning a msg_id)

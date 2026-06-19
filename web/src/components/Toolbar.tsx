@@ -1,7 +1,5 @@
-import { useStore, type CellMetadata, type SqlConnection } from "../lib/store";
-import { generateConnectorCode } from "../lib/connectors";
-import { generateChartCode } from "../lib/charts";
-import { generateKpiCode } from "../lib/kpi";
+import { useStore } from "../lib/store";
+import { runAllCells } from "../lib/run";
 import type { NotebookSocket } from "../lib/ws";
 import type { Checkpoint, KernelSpec } from "../lib/document";
 import type { PanelTab } from "./SidePanel";
@@ -40,77 +38,10 @@ export function Toolbar({
   const aiAvailable = useStore((s) => s.aiAvailable);
   const reactive = useStore((s) => s.reactive);
   const appMode = useStore((s) => s.appMode);
+  const autoRunMs = useStore((s) => s.autoRunMs);
+  const peers = useStore((s) => s.peers);
 
-  // Run every block top-to-bottom, each by its kind: markdown renders, inputs
-  // bind their variable, SQL compiles to pandas, code runs as-is. The kernel
-  // serializes the shell channel, so order is preserved across the awaits.
-  const runAll = async () => {
-    const state = useStore.getState();
-    for (const cell of state.cells) {
-      const m = (cell.metadata ?? {}) as CellMetadata;
-      if (cell.cell_type === "markdown") {
-        state.setRendered(cell.id, true);
-      } else if (cell.cell_type === "input") {
-        const name = (m.var_name ?? "").trim();
-        if (name) {
-          try {
-            await socket.setVariable(name, (m.value ?? "") as boolean | number | string);
-          } catch {
-            /* skip a failed bind */
-          }
-        }
-      } else if (cell.cell_type === "sql") {
-        const conn: SqlConnection = m.connection ?? { type: "sqlite" };
-        const params: Record<string, string> = { query: cell.source, var: m.result_var || "df" };
-        if (conn.type === "sqlalchemy") params.url = conn.url ?? "";
-        else params.db_path = conn.db_path ?? "";
-        try {
-          const code = await generateConnectorCode(
-            conn.type === "sqlalchemy" ? "sqlalchemy" : "sqlite",
-            params,
-          );
-          state.clearOutputs(cell.id);
-          state.markQueued(cell.id);
-          socket.execute(cell.id, code);
-        } catch {
-          /* skip a misconfigured SQL block */
-        }
-      } else if (cell.cell_type === "chart") {
-        try {
-          const code = await generateChartCode({
-            df: m.df ?? "",
-            chart_type: m.chart_type ?? "line",
-            x: m.x ?? "",
-            y: m.y ?? "",
-            title: m.title ?? "",
-          });
-          state.clearOutputs(cell.id);
-          state.markQueued(cell.id);
-          socket.execute(cell.id, code);
-        } catch {
-          /* skip a misconfigured chart block */
-        }
-      } else if (cell.cell_type === "kpi") {
-        try {
-          const code = await generateKpiCode({
-            expression: m.expression ?? "",
-            label: m.label ?? "",
-            number_format: m.number_format ?? "",
-          });
-          state.clearOutputs(cell.id);
-          state.markQueued(cell.id);
-          socket.execute(cell.id, code);
-        } catch {
-          /* skip a KPI block with no expression yet */
-        }
-      } else {
-        state.clearOutputs(cell.id);
-        state.markQueued(cell.id);
-        socket.execute(cell.id, cell.source);
-      }
-    }
-    useStore.getState().touchVariables();
-  };
+  const runAll = () => void runAllCells(socket);
 
   const restore = (id: string) => {
     if (!id) return;
@@ -146,6 +77,17 @@ export function Toolbar({
 
       <div className="toolbar-group">
         <button onClick={runAll} title="Run all cells">⏩ Run all</button>
+        <select
+          className="autorun-select"
+          value={autoRunMs}
+          onChange={(e) => useStore.getState().setAutoRunMs(Number(e.target.value))}
+          title="Auto-run the whole notebook on a schedule (live dashboards)"
+        >
+          <option value={0}>Auto-run: off</option>
+          <option value={5000}>every 5s</option>
+          <option value={30000}>every 30s</option>
+          <option value={60000}>every 1m</option>
+        </select>
         <button onClick={() => socket.interrupt()} title="Interrupt the kernel">■ Interrupt</button>
         <button onClick={() => socket.restart()} title="Restart the kernel">⟳ Restart</button>
         {!appMode && (
@@ -235,6 +177,21 @@ export function Toolbar({
       <span className={`save-state ${saveState}`}>
         {saveState === "saving" ? "saving…" : saveState === "dirty" ? "unsaved" : "saved"}
       </span>
+
+      {peers.length > 1 && (
+        <div className="presence" title={`${peers.length} viewers`}>
+          {peers.slice(0, 5).map((p) => (
+            <span
+              key={p.client_id}
+              className="presence-dot"
+              style={{ background: p.color }}
+              title={p.name}
+            >
+              {p.name.charAt(0).toUpperCase()}
+            </span>
+          ))}
+        </div>
+      )}
 
       <span className={`conn ${statusClass}`} title="Kernel status">
         ● {statusLabel}

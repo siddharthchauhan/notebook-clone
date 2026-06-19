@@ -269,11 +269,12 @@ def create_notebook(notebook_id: str) -> dict[str, str]:
 
 
 def delete_notebook(notebook_id: str) -> None:
-    """Delete a notebook and any of its checkpoints."""
+    """Delete a notebook and any of its checkpoints + comment sidecar."""
     _path_for(notebook_id).unlink(missing_ok=True)
     cdir = _checkpoint_dir(notebook_id)
     if cdir.exists():
         shutil.rmtree(cdir, ignore_errors=True)
+    (NOTEBOOKS_DIR / ".comments" / f"{Path(notebook_id).name}.json").unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------------- #

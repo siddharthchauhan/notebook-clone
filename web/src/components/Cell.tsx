@@ -17,6 +17,7 @@ import { generateKpiCode } from "../lib/kpi";
 import { reactiveRerun } from "../lib/reactive";
 import { renderMarkdown } from "../lib/markdown";
 import { stripAnsi } from "../lib/ansi";
+import { addComment, deleteComment, getAuthor } from "../lib/comments";
 
 // Code, SQL, chart, and KPI blocks run code and show an [n] prompt + outputs.
 function isExecutable(t: CellType): boolean {
@@ -46,6 +47,7 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
   const [inspect, setInspect] = useState<string | null>(null);
   const [sqlError, setSqlError] = useState<string | null>(null);
   const [chartError, setChartError] = useState<string | null>(null);
+  const [showComments, setShowComments] = useState(false);
   if (!cell) return null;
 
   // App view: drop the editor + chrome; show only what an app would — rendered
@@ -171,7 +173,11 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
 
   return (
     <div className={`cell ${cell.cell_type}`}>
-      <CellToolbar cell={cell} onRun={run} />
+      <CellToolbar
+        cell={cell}
+        onRun={run}
+        onToggleComments={() => setShowComments((s) => !s)}
+      />
       <div className="cell-body">
         {cell.cell_type === "sql" && (
           <SqlConfig cellId={cell.id} metadata={cell.metadata} />
@@ -197,6 +203,8 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
             cellId={cell.id}
             cellType={cell.cell_type}
             initialValue={cell.source}
+            source={cell.source}
+            remoteEpoch={cell.remoteEpoch ?? 0}
             socket={socket}
             onRun={run}
             onInspect={cell.cell_type === "code" ? setInspect : undefined}
@@ -220,6 +228,65 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
         )}
 
         <AiAssist cell={cell} />
+
+        {showComments && <CommentThread cellId={cell.id} />}
+      </div>
+    </div>
+  );
+}
+
+// A per-cell comment thread: list + delete + add (a JSON sidecar on the server).
+function CommentThread({ cellId }: { cellId: string }) {
+  const notebookId = useStore((s) => s.notebookId);
+  const comments = useStore((s) => s.comments[cellId] ?? []);
+  const [text, setText] = useState("");
+
+  const add = async () => {
+    const t = text.trim();
+    if (!t) return;
+    try {
+      const c = await addComment(notebookId, cellId, getAuthor(), t);
+      useStore.getState().addCommentLocal(c);
+      setText("");
+    } catch {
+      /* best-effort */
+    }
+  };
+  const remove = async (id: string) => {
+    try {
+      await deleteComment(notebookId, id);
+      useStore.getState().removeCommentLocal(id);
+    } catch {
+      /* best-effort */
+    }
+  };
+
+  return (
+    <div className="comment-thread">
+      {comments.map((c) => (
+        <div key={c.id} className="comment">
+          <div className="comment-meta">
+            <b>{c.author}</b> · {new Date(c.created_at).toLocaleString()}
+            <button className="comment-del" onClick={() => remove(c.id)} title="Delete">
+              ×
+            </button>
+          </div>
+          <div className="comment-text">{c.text}</div>
+        </div>
+      ))}
+      <div className="comment-add">
+        <textarea
+          rows={2}
+          value={text}
+          placeholder="Add a comment…"
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void add();
+          }}
+        />
+        <button onClick={add} disabled={!text.trim()}>
+          Comment
+        </button>
       </div>
     </div>
   );
@@ -595,8 +662,17 @@ function KpiConfig({ cellId, metadata }: { cellId: string; metadata?: CellMetada
   );
 }
 
-function CellToolbar({ cell, onRun }: { cell: CellState; onRun: () => void }) {
+function CellToolbar({
+  cell,
+  onRun,
+  onToggleComments,
+}: {
+  cell: CellState;
+  onRun: () => void;
+  onToggleComments: () => void;
+}) {
   const { addCell, deleteCell, moveCell, setCellType } = useStore.getState();
+  const commentCount = useStore((s) => s.comments[cell.id]?.length ?? 0);
 
   const busy = cell.execution_state === "busy";
   const queued = cell.execution_state === "queued";
@@ -639,6 +715,13 @@ function CellToolbar({ cell, onRun }: { cell: CellState; onRun: () => void }) {
         <option value="chart">Chart</option>
         <option value="kpi">KPI</option>
       </select>
+      <button
+        className={`comment-btn${commentCount ? " has" : ""}`}
+        onClick={onToggleComments}
+        title="Comments"
+      >
+        💬{commentCount > 0 ? ` ${commentCount}` : ""}
+      </button>
       <button onClick={() => moveCell(cell.id, -1)} title="Move up">
         ↑
       </button>

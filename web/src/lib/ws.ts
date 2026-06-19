@@ -7,7 +7,7 @@ import type {
   VariableChildrenReplyEvent,
   VariablesReplyEvent,
 } from "./protocol";
-import { useStore } from "./store";
+import { useStore, type DocOp } from "./store";
 import { KernelWidgetManager } from "./widgets";
 
 type ReplyEvent =
@@ -25,6 +25,7 @@ export class NotebookSocket {
   private ws: WebSocket | null = null;
   private readonly notebookId: string;
   private readonly kernelName: string | null;
+  private readonly name: string | null;
   private closedByUser = false;
   private reconnectAttempts = 0;
   private reconnectTimer: number | null = null;
@@ -32,15 +33,23 @@ export class NotebookSocket {
   // Live ipywidgets manager for this notebook; renders widget-view outputs.
   readonly widgets: KernelWidgetManager;
 
-  constructor(notebookId: string, kernelName: string | null = null) {
+  constructor(
+    notebookId: string,
+    kernelName: string | null = null,
+    name: string | null = null,
+  ) {
     this.notebookId = notebookId;
     this.kernelName = kernelName;
+    this.name = name;
     this.widgets = new KernelWidgetManager(this);
   }
 
   connect(): void {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const q = this.kernelName ? `?kernel=${encodeURIComponent(this.kernelName)}` : "";
+    const params = new URLSearchParams();
+    if (this.kernelName) params.set("kernel", this.kernelName);
+    if (this.name) params.set("name", this.name);
+    const q = params.toString() ? `?${params}` : "";
     const ws = new WebSocket(`${proto}://${location.host}/ws/${this.notebookId}${q}`);
     this.ws = ws;
 
@@ -82,6 +91,15 @@ export class NotebookSocket {
       }
       if (event.type === "comm_close") {
         this.widgets.onCommClose(event);
+        return;
+      }
+      // Collaboration: a peer's edit, or the presence roster.
+      if (event.type === "doc_op") {
+        useStore.getState().applyRemoteOp(event.op as never);
+        return;
+      }
+      if (event.type === "presence") {
+        useStore.getState().setPeers(event.peers);
         return;
       }
       useStore.getState().applyEvent(event);
@@ -211,6 +229,11 @@ export class NotebookSocket {
       request_id: crypto.randomUUID(),
       name,
     });
+  }
+
+  // Collaboration: broadcast a local document edit to peers on this notebook.
+  docOp(op: DocOp): void {
+    this.send({ type: "doc_op_request", op: op as unknown as Record<string, unknown> });
   }
 
   // --- comm protocol (ipywidgets), browser -> kernel; CommSink interface --- //

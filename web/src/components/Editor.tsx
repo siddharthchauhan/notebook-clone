@@ -20,6 +20,10 @@ interface EditorProps {
   socket: NotebookSocket;
   onRun: () => void;
   onInspect?: (text: string | null) => void;
+  // Collaboration: latest source + a counter that bumps on a remote edit, so a
+  // non-focused editor can refresh its text without clobbering local typing.
+  source?: string;
+  remoteEpoch?: number;
 }
 
 function asString(v: unknown): string {
@@ -53,12 +57,34 @@ export function Editor({
   socket,
   onRun,
   onInspect,
+  source,
+  remoteEpoch = 0,
 }: EditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView | null>(null);
+  // True while we apply a remote edit, so the update listener doesn't echo it.
+  const applyingRemoteRef = useRef(false);
+  const sourceRef = useRef(source ?? initialValue);
+  sourceRef.current = source ?? initialValue;
   const onRunRef = useRef(onRun);
   onRunRef.current = onRun;
   const onInspectRef = useRef(onInspect);
   onInspectRef.current = onInspect;
+
+  // Apply a collaborator's source edit (bumped remoteEpoch). Skip while this
+  // editor is focused — last-writer-wins, but never yank text from under you.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || view.hasFocus) return;
+    const current = view.state.doc.toString();
+    if (current === sourceRef.current) return;
+    applyingRemoteRef.current = true;
+    view.dispatch({
+      changes: { from: 0, to: current.length, insert: sourceRef.current },
+    });
+    applyingRemoteRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteEpoch]);
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -93,7 +119,8 @@ export function Editor({
       Prec.highest(keymap.of(keys)),
       basicSetup,
       EditorView.updateListener.of((u) => {
-        if (u.docChanged) {
+        // A remote edit we applied ourselves must not echo back out as local.
+        if (u.docChanged && !applyingRemoteRef.current) {
           useStore.getState().setSource(cellId, u.state.doc.toString());
         }
       }),
@@ -109,7 +136,11 @@ export function Editor({
       parent: hostRef.current,
       state: EditorState.create({ doc: initialValue, extensions }),
     });
-    return () => view.destroy();
+    viewRef.current = view;
+    return () => {
+      viewRef.current = null;
+      view.destroy();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cellId, cellType]);
 
