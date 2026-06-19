@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from app.config import settings
 
 Action = Literal["generate", "fix", "explain", "edit"]
-Mode = Literal["code", "text"]
+Mode = Literal["code", "text", "chat"]
 
 
 class AIRequest(BaseModel):
@@ -33,6 +33,18 @@ class AIRequest(BaseModel):
     code: str = ""
     traceback: list[str] = Field(default_factory=list)
     language: str = "python"
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
+class ChatRequest(BaseModel):
+    """A multi-turn chat, optionally grounded in the current notebook."""
+
+    messages: list[ChatMessage]
+    context: str = ""
 
 
 # System prompts. Code-mode is deliberately strict — the stream is piped into a
@@ -50,6 +62,21 @@ TEXT_SYSTEM = (
     "You are a helpful assistant embedded in a Python notebook. Answer "
     "concisely in GitHub-flavored Markdown. Use fenced code blocks for any code."
 )
+
+CHAT_SYSTEM = (
+    "You are a helpful assistant embedded in a Python notebook. Help the user "
+    "with their code and analysis. Be concise and use GitHub-flavored Markdown "
+    "with fenced code blocks."
+)
+
+
+def build_chat(req: "ChatRequest") -> tuple[str, list[dict], Mode]:
+    """Return ``(system, messages, mode)`` for a chat request."""
+    system = CHAT_SYSTEM
+    if req.context.strip():
+        system += "\n\nThe user's current notebook, for context:\n\n" + req.context
+    messages = [{"role": m.role, "content": m.content} for m in req.messages]
+    return system, messages, "chat"
 
 
 def build_prompt(req: AIRequest) -> tuple[str, str, Mode]:
@@ -88,7 +115,9 @@ def build_prompt(req: AIRequest) -> tuple[str, str, Mode]:
 
 
 class Provider(Protocol):
-    def stream(self, system: str, user: str, mode: Mode) -> AsyncIterator[str]: ...
+    def stream(
+        self, system: str, messages: list[dict], mode: Mode
+    ) -> AsyncIterator[str]: ...
 
 
 class AnthropicProvider:
@@ -99,7 +128,9 @@ class AnthropicProvider:
         self._model = model
         self._max_tokens = max_tokens
 
-    async def stream(self, system: str, user: str, mode: Mode) -> AsyncIterator[str]:
+    async def stream(
+        self, system: str, messages: list[dict], mode: Mode
+    ) -> AsyncIterator[str]:
         import anthropic  # lazy import: keeps the SDK optional for tests / echo
 
         # AsyncAnthropic() resolves ANTHROPIC_API_KEY from the env on its own;
@@ -113,7 +144,7 @@ class AnthropicProvider:
             model=self._model,
             max_tokens=self._max_tokens,
             system=system,
-            messages=[{"role": "user", "content": user}],
+            messages=messages,
         ) as stream:
             async for text in stream.text_stream:
                 yield text
@@ -125,12 +156,16 @@ class EchoProvider:
     Emits in a couple of chunks so the streaming path is exercised end to end.
     """
 
-    async def stream(self, system: str, user: str, mode: Mode) -> AsyncIterator[str]:
-        chunks = (
-            ["This cell ", "prints a value ", "and returns `None`."]
-            if mode == "text"
-            else ["print('hello ", "from ai')\n"]
-        )
+    async def stream(
+        self, system: str, messages: list[dict], mode: Mode
+    ) -> AsyncIterator[str]:
+        if mode == "chat":
+            last = messages[-1]["content"] if messages else ""
+            chunks = ["You said: ", last]
+        elif mode == "text":
+            chunks = ["This cell ", "prints a value ", "and returns `None`."]
+        else:
+            chunks = ["print('hello ", "from ai')\n"]
         for chunk in chunks:
             yield chunk
 
@@ -156,7 +191,13 @@ class AIService:
 
     async def stream(self, req: AIRequest) -> AsyncIterator[str]:
         system, user, mode = build_prompt(req)
-        async for delta in self._provider().stream(system, user, mode):
+        messages = [{"role": "user", "content": user}]
+        async for delta in self._provider().stream(system, messages, mode):
+            yield delta
+
+    async def chat(self, req: ChatRequest) -> AsyncIterator[str]:
+        system, messages, mode = build_chat(req)
+        async for delta in self._provider().stream(system, messages, mode):
             yield delta
 
 

@@ -29,6 +29,11 @@ interface StreamOpts {
   signal?: AbortSignal;
 }
 
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 // One parsed SSE frame: an `event:` line plus a JSON `data:` payload.
 function parseFrame(frame: string): { event: string; data: unknown } | null {
   let event = "message";
@@ -41,11 +46,13 @@ function parseFrame(frame: string): { event: string; data: unknown } | null {
   return { event, data: JSON.parse(data) };
 }
 
-export async function streamAI(req: AiRequest, opts: StreamOpts): Promise<void> {
-  const r = await fetch("/api/ai/complete", {
+// POST `body` to `path` and drive `onToken` from the SSE token stream. Resolves
+// on `done`, throws on `error` or transport failure. Shared by complete + chat.
+async function consumeSSE(path: string, body: unknown, opts: StreamOpts): Promise<void> {
+  const r = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
+    body: JSON.stringify(body),
     signal: opts.signal,
   });
   if (r.status === 503) throw new Error("AI is not configured on the server");
@@ -75,4 +82,16 @@ export async function streamAI(req: AiRequest, opts: StreamOpts): Promise<void> 
       }
     }
   }
+}
+
+export function streamAI(req: AiRequest, opts: StreamOpts): Promise<void> {
+  return consumeSSE("/api/ai/complete", req, opts);
+}
+
+export function streamChat(
+  messages: ChatMessage[],
+  context: string,
+  opts: StreamOpts,
+): Promise<void> {
+  return consumeSSE("/api/ai/chat", { messages, context }, opts);
 }

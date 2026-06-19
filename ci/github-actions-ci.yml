@@ -1,0 +1,74 @@
+# CI for notebook-clone. To activate, move this file to .github/workflows/ci.yml
+# (parked here because the bot that authored it lacks the `workflows` push scope).
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Backend (pytest, real kernel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        working-directory: server
+        run: uv sync --extra dev
+      - name: Run tests
+        working-directory: server
+        run: uv run pytest -q
+
+  frontend:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+      - name: Typecheck + build
+        working-directory: web
+        run: npm run build
+
+  e2e:
+    name: End-to-end (real kernel + Chromium)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install server dependencies
+        working-directory: server
+        run: uv sync --extra dev
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Start servers and run e2e
+        run: |
+          ( cd server && NBCLONE_AI_PROVIDER=echo uv run uvicorn app.main:app --port 8000 ) &
+          ( cd web && npm run dev -- --port 5173 ) &
+          curl -sf --retry 90 --retry-delay 1 --retry-connrefused http://127.0.0.1:8000/healthz
+          curl -sf --retry 90 --retry-delay 1 --retry-connrefused http://127.0.0.1:5173/
+          ( cd web && node e2e/run.mjs )

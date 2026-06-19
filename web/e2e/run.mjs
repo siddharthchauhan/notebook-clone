@@ -11,6 +11,7 @@ const page = await browser.newPage();
 const consoleErrors = [];
 page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
 page.on("pageerror", (e) => consoleErrors.push(String(e)));
+page.on("dialog", (d) => d.accept()); // auto-accept confirm() (e.g. delete notebook)
 
 const setSource = (i, src) =>
   page.evaluate(
@@ -186,6 +187,379 @@ try {
     const toggles = await page.locator(".ai-toggle").count();
     check("ai controls hidden when unavailable", toggles === 0, `toggles=${toggles}`);
   }
+
+  // 12) variable explorer: define vars, open the panel, see them listed
+  await setSource(1, 'explorer_var = 42\nexplorer_map = {"a": 1, "b": 2}');
+  await runAndWaitIdle(page.locator(".cell.code").first(), 1);
+  await page.locator(".btn-variables").click();
+  const sawVar = await page
+    .locator(".var-name", { hasText: "explorer_var" })
+    .first()
+    .waitFor({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+  check("variable explorer lists var", sawVar, "");
+
+  // 12b) inspect a variable's value (kernel inspect)
+  await page.locator(".var-inspect", { hasText: "explorer_var" }).first().click();
+  const inspected = await page
+    .locator(".var-inspect-panel")
+    .filter({ hasText: "int" })
+    .first()
+    .waitFor({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+  check("variable inspect", inspected, "");
+
+  // 12c) expand a container variable to see its children
+  await page.locator(".var-row", { hasText: "explorer_map" }).locator(".var-expand").click();
+  const expandedChild = await page
+    .locator(".var-child-row", { hasText: "'a'" })
+    .first()
+    .waitFor({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+  check("variable expand children", expandedChild, "");
+
+  // 12d) sort by a column header
+  await page.locator(".var-th", { hasText: "Type" }).click();
+  const sorted = await page
+    .locator(".var-th.sorted", { hasText: "Type" })
+    .first()
+    .waitFor({ timeout: 4000 })
+    .then(() => true)
+    .catch(() => false);
+  check("variable sort", sorted, "");
+
+  // 12e) delete a variable from the kernel
+  await page.locator(".var-row", { hasText: "explorer_var" }).locator(".var-del").click();
+  const deleted = await page
+    .waitForFunction(
+      () => ![...document.querySelectorAll(".var-inspect")].some((el) => el.textContent === "explorer_var"),
+      null,
+      { timeout: 8000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("variable delete", deleted, "");
+
+  // 12f) ipywidgets: a live IntSlider renders, with its kernel-side value
+  // (exercises the full widget manager + comm_open round-trip in the browser).
+  await setSource(1, "import ipywidgets as w\nslider = w.IntSlider(value=5)\nslider");
+  await runAndWaitIdle(page.locator(".cell.code").first(), 1);
+  const widgetReadout = await page
+    .locator(".jupyter-widgets .widget-readout")
+    .filter({ hasText: "5" })
+    .first()
+    .waitFor({ timeout: 15000 })
+    .then(() => true)
+    .catch(() => false);
+  check("ipywidgets slider renders", widgetReadout, "");
+
+  // 12g) data connectors: create a SQLite DB, then load it via the connector UI
+  await setSource(
+    1,
+    "import sqlite3\n_c = sqlite3.connect('e2e_conn.db')\n_c.execute('DROP TABLE IF EXISTS t')\n_c.execute('CREATE TABLE t (x)')\n_c.execute('INSERT INTO t VALUES (4242)')\n_c.commit()\n_c.close()",
+  );
+  await runAndWaitIdle(page.locator(".cell.code").first(), 1);
+  await page.locator(".btn-data").click();
+  await page.selectOption(".conn-select", "sqlite");
+  await page.fill('.conn-field[name="db_path"]', "e2e_conn.db");
+  await page.fill('.conn-field[name="query"]', "SELECT x FROM t");
+  await page.fill('.conn-field[name="var"]', "conn_df");
+  await page.locator(".conn-load").click();
+  const connLoaded = await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll(".outputs")].some(
+          (el) => el.textContent && el.textContent.includes("4242"),
+        ),
+      null,
+      { timeout: 20000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("data connector loads sqlite", connLoaded, "");
+
+  // 12h) SQL block: create a DB, add a SQL block, configure it via the store,
+  // run it, and see the queried value render in that block's output.
+  await setSource(
+    1,
+    "import sqlite3\n_c = sqlite3.connect('e2e_sqlblock.db')\n_c.execute('DROP TABLE IF EXISTS t')\n_c.execute('CREATE TABLE t (x)')\n_c.execute('INSERT INTO t VALUES (31337)')\n_c.commit()\n_c.close()",
+  );
+  await runAndWaitIdle(page.locator(".cell.code").first(), 1);
+  await page.locator(".btn-add-sql").click();
+  await page.evaluate(() => {
+    const st = window.__store.getState();
+    const cells = st.cells;
+    const sqlCell = cells[cells.length - 1];
+    st.setSource(sqlCell.id, "SELECT x FROM t");
+    st.setCellMetadata(sqlCell.id, {
+      connection: { type: "sqlite", db_path: "e2e_sqlblock.db" },
+      result_var: "sqldf",
+    });
+  });
+  await page.locator(".cell.sql .run-btn").last().click();
+  const sqlOk = await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll(".cell.sql .outputs")].some(
+          (el) => el.textContent && el.textContent.includes("31337"),
+        ),
+      null,
+      { timeout: 20000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("sql block runs query", sqlOk, "");
+
+  // 12i) input block: a no-code control binds a kernel global usable from code.
+  await page.locator(".btn-add-input").click();
+  await page.evaluate(() => {
+    const st = window.__store.getState();
+    const cells = st.cells;
+    const inp = cells[cells.length - 1];
+    st.setCellMetadata(inp.id, {
+      input_type: "text",
+      var_name: "thresh",
+      value: "inp_tok_777",
+    });
+  });
+  await page.locator(".cell.input .run-btn").last().click(); // "Set"
+  await setSource(1, "print(thresh)");
+  await runAndWaitIdle(page.locator(".cell.code").first(), 1);
+  const inputOk = await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll(".cell.code .outputs")].some(
+          (el) => el.textContent && el.textContent.includes("inp_tok_777"),
+        ),
+      null,
+      { timeout: 15000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("input block binds variable", inputOk, "");
+
+  // 12j) reactive execution: changing an input re-runs the blocks that read it.
+  await page.evaluate(() => window.__store.getState().setReactive(true));
+  await page.locator(".btn-add-input").click();
+  await page.evaluate(() => {
+    const st = window.__store.getState();
+    const inp = st.cells[st.cells.length - 1];
+    st.setCellMetadata(inp.id, {
+      input_type: "slider",
+      var_name: "rx",
+      value: 5,
+      min: 0,
+      max: 100,
+      step: 1,
+    });
+  });
+  await page.locator(".cell.input .run-btn").last().click(); // bind rx = 5
+  await page.locator(".btn-add-cell").click();
+  const rxCodeIdx = await page.evaluate(() => {
+    const st = window.__store.getState();
+    const idx = st.cells.length - 1;
+    st.setSource(st.cells[idx].id, 'print("rx_is", rx)');
+    return idx;
+  });
+  await runAndWaitIdle(page.locator(".cell.code").last(), rxCodeIdx); // prints rx_is 5
+  // Change the input to 9 and re-bind; the dependent code cell should re-run.
+  await page.evaluate(() => {
+    const st = window.__store.getState();
+    const inp = st.cells.find(
+      (c) => c.cell_type === "input" && c.metadata && c.metadata.var_name === "rx",
+    );
+    st.setCellMetadata(inp.id, { value: 9 });
+  });
+  await page.locator(".cell.input .run-btn").last().click(); // bind rx = 9 → reactive re-run
+  const reactiveOk = await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll(".cell.code .outputs")].some(
+          (el) => el.textContent && el.textContent.includes("rx_is 9"),
+        ),
+      null,
+      { timeout: 15000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("reactive re-run on input change", reactiveOk, "");
+
+  // 12k) chart block: build a DataFrame, chart it, and see a PNG figure render.
+  await page.locator(".btn-add-cell").click();
+  const cdfIdx = await page.evaluate(() => {
+    const st = window.__store.getState();
+    const idx = st.cells.length - 1;
+    st.setSource(
+      st.cells[idx].id,
+      "import pandas as pd\ncdf = pd.DataFrame({'a': [1, 2, 3], 'b': [10, 20, 30]})",
+    );
+    return idx;
+  });
+  await runAndWaitIdle(page.locator(".cell.code").last(), cdfIdx);
+  await page.locator(".btn-add-chart").click();
+  await page.evaluate(() => {
+    const st = window.__store.getState();
+    const chart = st.cells[st.cells.length - 1];
+    st.setCellMetadata(chart.id, { df: "cdf", chart_type: "bar", x: "a", y: "b" });
+  });
+  await page.locator(".cell.chart .run-btn").last().click();
+  const chartImg = await page
+    .waitForFunction(
+      () => {
+        const img = document.querySelector(".cell.chart img.output.image");
+        return img && img.getAttribute("src")?.startsWith("data:image/png;base64,");
+      },
+      null,
+      { timeout: 20000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("chart block renders a figure", chartImg, "");
+
+  // 12l) app view: hide code + chrome, keep inputs live and show block outputs.
+  await page.locator(".btn-appmode").click();
+  const appView = await page.evaluate(() => ({
+    appCells: document.querySelectorAll(".app-cell").length,
+    editors: document.querySelectorAll(".cm-host").length,
+    addBtn: document.querySelectorAll(".btn-add-cell").length,
+    inputs: document.querySelectorAll(".input-block.compact").length,
+    chartImg: !!document.querySelector(".app-cell.chart img.output.image"),
+  }));
+  check(
+    "app view: editors + chrome hidden",
+    appView.editors === 0 && appView.addBtn === 0,
+    JSON.stringify(appView),
+  );
+  check(
+    "app view: inputs live + outputs shown",
+    appView.appCells > 0 && appView.inputs > 0 && appView.chartImg,
+    JSON.stringify(appView),
+  );
+  // Back to edit view; the editors should return.
+  await page.locator(".btn-appmode").click();
+  const editorsBack = await page.evaluate(
+    () => document.querySelectorAll(".cm-host").length,
+  );
+  check("edit view restores editors", editorsBack > 0, `editors=${editorsBack}`);
+
+  // 12m) KPI block: evaluate an expression over a DataFrame, render a big number.
+  await page.locator(".btn-add-kpi").click();
+  await page.evaluate(() => {
+    const st = window.__store.getState();
+    const kpi = st.cells[st.cells.length - 1];
+    st.setCellMetadata(kpi.id, { expression: "cdf['b'].sum()", label: "Total B" });
+  });
+  await page.locator(".cell.kpi .run-btn").last().click();
+  const kpiOk = await page
+    .waitForFunction(
+      () => {
+        const v = document.querySelector(".cell.kpi .kpi-value");
+        return v && v.textContent && v.textContent.includes("60");
+      },
+      null,
+      { timeout: 20000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("kpi block renders a metric", kpiOk, "");
+
+  // 12n) collaboration: a second viewer sees presence + live edits.
+  const page2 = await browser.newPage();
+  await page2.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page2.waitForFunction(
+    () => !!window.__store && window.__store.getState().connected,
+    null,
+    { timeout: 15000 },
+  );
+  const peersGte2 = (p) =>
+    p
+      .waitForFunction(() => window.__store.getState().peers.length >= 2, null, {
+        timeout: 10000,
+      })
+      .then(() => true)
+      .catch(() => false);
+  const [presenceOk, presenceOk2] = await Promise.all([peersGte2(page), peersGte2(page2)]);
+  check("presence shows both viewers", presenceOk && presenceOk2, "");
+
+  // Edit on page 1; the new cell + its text should appear on page 2 live.
+  const collabTok = "collab_tok_" + Date.now();
+  const collabId = await page.evaluate((t) => {
+    const st = window.__store.getState();
+    const id = st.addCell(null, "code", "");
+    st.setSource(id, "# " + t);
+    return id;
+  }, collabTok);
+  const syncedOk = await page2
+    .waitForFunction(
+      ([id, t]) => {
+        const c = window.__store.getState().cells.find((x) => x.id === id);
+        return !!c && c.source.includes(t);
+      },
+      [collabId, collabTok],
+      { timeout: 10000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("edits sync to the other viewer", syncedOk, "");
+  await page2.close();
+
+  // 13) export endpoints (.ipynb + HTML)
+  const ipynbResp = await page.request.get(`${BASE}/api/contents/default/export/ipynb`);
+  check(
+    "export ipynb",
+    ipynbResp.ok() && (ipynbResp.headers()["content-type"] || "").includes("ipynb"),
+    `status=${ipynbResp.status()}`,
+  );
+  const htmlResp = await page.request.get(`${BASE}/api/contents/default/export/html`);
+  const htmlBody = await htmlResp.text();
+  check(
+    "export html",
+    htmlResp.ok() && htmlBody.toLowerCase().includes("<html"),
+    `status=${htmlResp.status()}`,
+  );
+
+  // 14) AI chat (echo provider) — only when AI is configured
+  if (aiAvailable) {
+    await page.locator(".btn-chat").click();
+    await page.locator(".chat-input").fill("ping from e2e");
+    await page.locator(".chat-send").click();
+    const replied = await page
+      .locator(".chat-msg.assistant")
+      .filter({ hasText: "ping from e2e" })
+      .first()
+      .waitFor({ timeout: 8000 })
+      .then(() => true)
+      .catch(() => false);
+    check("ai chat reply", replied, "");
+  }
+
+  // 15) multi-notebook: create + switch, then delete (auto-switches away)
+  await page.locator(".btn-notebooks").click();
+  await page.locator(".nb-new-input").fill("e2e_nb");
+  await page.locator(".nb-new").click();
+  const switched = await page
+    .waitForFunction(() => document.querySelector(".btn-notebooks")?.textContent?.includes("e2e_nb"), null, {
+      timeout: 8000,
+    })
+    .then(() => true)
+    .catch(() => false);
+  check("notebook create + open", switched, "");
+
+  await page.locator(".nb-item", { hasText: "e2e_nb" }).locator(".nb-delete").click();
+  const removed = await page
+    .waitForFunction(
+      () =>
+        !document.querySelector(".btn-notebooks")?.textContent?.includes("e2e_nb") &&
+        ![...document.querySelectorAll(".nb-item")].some((el) => el.textContent?.includes("e2e_nb")),
+      null,
+      { timeout: 8000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("notebook delete", removed, "");
 
   check("no console errors", consoleErrors.length === 0, consoleErrors.slice(0, 3).join(" | "));
 } catch (e) {

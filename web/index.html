@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Notebook Clone — Phase 1</title>
+    <!-- @jupyter-widgets/html-manager reads/assigns this webpack global at load;
+         define it before the module script so the bundle doesn't ReferenceError. -->
+    <script>
+      window.__webpack_public_path__ = "";
+    </script>
   </head>
   <body>
     <div id="root"></div>

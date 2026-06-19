@@ -12,11 +12,14 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.contents import store
+from app.kernels.manager import registry
 
 router = APIRouter(prefix="/api/contents", tags=["contents"])
+notebooks_router = APIRouter(prefix="/api/notebooks", tags=["notebooks"])
 
 
 class CellModel(BaseModel):
@@ -73,3 +76,48 @@ def restore_checkpoint(notebook_id: str, checkpoint_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="checkpoint not found") from exc
+
+
+@router.get("/{notebook_id}/export/{fmt}")
+def export_notebook(notebook_id: str, fmt: str) -> Response:
+    try:
+        content, media_type, filename = store.export_notebook(notebook_id, fmt)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# --------------------------------------------------------------------------- #
+# multi-notebook management (/api/notebooks)
+# --------------------------------------------------------------------------- #
+class NewNotebook(BaseModel):
+    name: str
+
+
+@notebooks_router.get("")
+def list_notebooks() -> list[dict[str, str]]:
+    return store.list_notebooks()
+
+
+@notebooks_router.post("")
+def create_notebook(body: NewNotebook) -> dict[str, str]:
+    try:
+        return store.create_notebook(body.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail="notebook already exists") from exc
+
+
+@notebooks_router.delete("/{notebook_id}")
+async def delete_notebook(notebook_id: str) -> dict[str, bool]:
+    try:
+        store.delete_notebook(notebook_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await registry.shutdown(notebook_id)  # drop its kernel if running
+    return {"ok": True}

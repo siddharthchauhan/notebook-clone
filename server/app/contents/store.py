@@ -25,6 +25,10 @@ from nbformat import NotebookNode
 NOTEBOOKS_DIR = Path(__file__).resolve().parents[2] / "notebooks"
 NBFORMAT_VERSION = 4
 
+# Block types that persist as code cells tagged in metadata (see the mapping
+# below). Kept in one place so every block round-trips without special-casing.
+_BLOCK_TYPES = {"sql", "input", "chart"}
+
 _DEFAULT_KERNELSPEC = {
     "name": "python3",
     "display_name": "Python 3",
@@ -100,9 +104,14 @@ def _source_to_str(source: Any) -> str:
 def notebook_to_document(nb: NotebookNode) -> dict[str, Any]:
     cells = []
     for c in nb.cells:
-        cell_type = c.get("cell_type", "code")
+        nb_type = c.get("cell_type", "code")
+        # Block config (SQL/input/chart/… ) is stored under cell metadata so the
+        # file stays valid nbformat; block_type is surfaced as the client type.
+        meta = dict(c.get("metadata", {}).get("deepnote", {}))
+        block_type = meta.pop("block_type", None)
+        cell_type = block_type if block_type in _BLOCK_TYPES else nb_type
         outputs = []
-        if cell_type == "code":
+        if nb_type == "code":
             outputs = [
                 mapped
                 for o in c.get("outputs", [])
@@ -115,6 +124,7 @@ def notebook_to_document(nb: NotebookNode) -> dict[str, Any]:
                 "source": _source_to_str(c.get("source", "")),
                 "outputs": outputs,
                 "execution_count": c.get("execution_count"),
+                "metadata": meta,
             }
         )
     return {"cells": cells, "metadata": dict(nb.get("metadata", {}))}
@@ -127,9 +137,11 @@ def document_to_notebook(doc: dict[str, Any]) -> NotebookNode:
 
     cells = []
     for c in doc.get("cells", []):
-        if c.get("cell_type") == "markdown":
+        ctype = c.get("cell_type")
+        if ctype == "markdown":
             cell = nbformat.v4.new_markdown_cell(source=c.get("source", ""))
         else:
+            # code and every non-markdown block (e.g. sql) persist as code cells.
             cell = nbformat.v4.new_code_cell(source=c.get("source", ""))
             cell.outputs = [
                 mapped
@@ -138,6 +150,12 @@ def document_to_notebook(doc: dict[str, Any]) -> NotebookNode:
             ]
             if c.get("execution_count") is not None:
                 cell.execution_count = c["execution_count"]
+        # Round-trip block type + config under cell metadata.
+        deepnote = {k: v for k, v in (c.get("metadata") or {}).items()}
+        if ctype not in ("code", "markdown"):
+            deepnote["block_type"] = ctype
+        if deepnote:
+            cell.metadata["deepnote"] = deepnote
         # Preserve the client's stable cell id (valid nbformat v4.5 id chars).
         if c.get("id"):
             cell["id"] = c["id"]
@@ -156,14 +174,18 @@ def _path_for(notebook_id: str) -> Path:
     return NOTEBOOKS_DIR / f"{safe}.ipynb"
 
 
-def load_document(notebook_id: str) -> dict[str, Any]:
-    """Load a notebook as a client document, seeding the starter if absent."""
+def read_notebook(notebook_id: str) -> NotebookNode:
+    """Read a notebook from disk, seeding the starter if absent."""
     path = _path_for(notebook_id)
     if not path.exists():
         NOTEBOOKS_DIR.mkdir(parents=True, exist_ok=True)
         nbformat.write(_starter_notebook(), path)
-    nb = nbformat.read(path, as_version=NBFORMAT_VERSION)
-    return notebook_to_document(nb)
+    return nbformat.read(path, as_version=NBFORMAT_VERSION)
+
+
+def load_document(notebook_id: str) -> dict[str, Any]:
+    """Load a notebook as a client document, seeding the starter if absent."""
+    return notebook_to_document(read_notebook(notebook_id))
 
 
 def save_document(notebook_id: str, doc: dict[str, Any]) -> None:
@@ -220,3 +242,56 @@ def restore_checkpoint(notebook_id: str, checkpoint_id: str) -> dict[str, Any]:
     NOTEBOOKS_DIR.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(src, _path_for(notebook_id))
     return load_document(notebook_id)
+
+
+# --------------------------------------------------------------------------- #
+# multi-notebook management
+# --------------------------------------------------------------------------- #
+def list_notebooks() -> list[dict[str, str]]:
+    """List ``.ipynb`` files in the notebooks dir (newest first)."""
+    if not NOTEBOOKS_DIR.exists():
+        return []
+    items = [
+        {"id": p.stem, "last_modified": _iso_mtime(p)}
+        for p in NOTEBOOKS_DIR.glob("*.ipynb")
+    ]
+    return sorted(items, key=lambda x: x["last_modified"], reverse=True)
+
+
+def create_notebook(notebook_id: str) -> dict[str, str]:
+    """Create a new starter notebook; error if the id is taken."""
+    path = _path_for(notebook_id)  # also validates the id
+    if path.exists():
+        raise FileExistsError(notebook_id)
+    NOTEBOOKS_DIR.mkdir(parents=True, exist_ok=True)
+    nbformat.write(_starter_notebook(), path)
+    return {"id": notebook_id, "last_modified": _iso_mtime(path)}
+
+
+def delete_notebook(notebook_id: str) -> None:
+    """Delete a notebook and any of its checkpoints + comment sidecar."""
+    _path_for(notebook_id).unlink(missing_ok=True)
+    cdir = _checkpoint_dir(notebook_id)
+    if cdir.exists():
+        shutil.rmtree(cdir, ignore_errors=True)
+    (NOTEBOOKS_DIR / ".comments" / f"{Path(notebook_id).name}.json").unlink(missing_ok=True)
+
+
+# --------------------------------------------------------------------------- #
+# export
+# --------------------------------------------------------------------------- #
+def export_notebook(notebook_id: str, fmt: str) -> tuple[bytes, str, str]:
+    """Return ``(content, media_type, filename)`` for ``fmt`` in {ipynb, html}."""
+    nb = read_notebook(notebook_id)
+    if fmt == "ipynb":
+        return (
+            nbformat.writes(nb).encode("utf-8"),
+            "application/x-ipynb+json",
+            f"{notebook_id}.ipynb",
+        )
+    if fmt == "html":
+        from nbconvert import HTMLExporter  # lazy: heavy import
+
+        body, _ = HTMLExporter(template_name="lab").from_notebook_node(nb)
+        return body.encode("utf-8"), "text/html", f"{notebook_id}.html"
+    raise ValueError(f"unsupported export format: {fmt!r}")

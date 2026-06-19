@@ -34,12 +34,79 @@ export interface InspectRequest {
   detail_level?: number;
 }
 
+export interface VariablesRequest {
+  type: "variables_request";
+  request_id: string;
+}
+
+export interface DeleteVariableRequest {
+  type: "delete_variable_request";
+  request_id: string;
+  name: string;
+}
+
+export interface VariableChildrenRequest {
+  type: "variable_children_request";
+  request_id: string;
+  name: string;
+}
+
+export interface SetVariableRequest {
+  type: "set_variable_request";
+  request_id: string;
+  name: string;
+  value: boolean | number | string;
+}
+
+export interface ColumnsRequest {
+  type: "columns_request";
+  request_id: string;
+  name: string;
+}
+
+export interface DocOpRequest {
+  type: "doc_op_request";
+  op: Record<string, unknown>;
+}
+
+// ipywidgets comm messages, browser -> kernel. buffers are base64 strings.
+export interface CommOpenRequest {
+  type: "comm_open_request";
+  comm_id: string;
+  target_name: string;
+  data: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  buffers: string[];
+}
+
+export interface CommMsgRequest {
+  type: "comm_msg_request";
+  comm_id: string;
+  data: Record<string, unknown>;
+  buffers: string[];
+}
+
+export interface CommCloseRequest {
+  type: "comm_close_request";
+  comm_id: string;
+  data: Record<string, unknown>;
+}
+
 export type ClientRequest =
   | ExecuteRequest
   | InterruptRequest
   | RestartRequest
   | CompleteRequest
-  | InspectRequest;
+  | InspectRequest
+  | VariablesRequest
+  | DeleteVariableRequest
+  | VariableChildrenRequest
+  | SetVariableRequest
+  | ColumnsRequest
+  | DocOpRequest
+  | CommOpenRequest
+  | CommMsgRequest
+  | CommCloseRequest;
 
 // --------------------------------------------------------------------------
 // server → client (discriminated union on `type`)
@@ -107,6 +174,79 @@ export interface InspectReplyEvent {
   data: Record<string, unknown>;
 }
 
+export interface VariableInfo {
+  name: string;
+  type: string;
+  repr: string;
+  size?: string;
+}
+
+export interface VariablesReplyEvent {
+  type: "variables_reply";
+  request_id: string;
+  variables: VariableInfo[];
+}
+
+export interface VariableChild {
+  key: string; // "" for set members; repr(key) for dict; index for list/tuple
+  type: string;
+  repr: string;
+  size?: string;
+}
+
+export interface VariableChildrenReplyEvent {
+  type: "variable_children_reply";
+  request_id: string;
+  name: string;
+  children: VariableChild[];
+}
+
+export interface ColumnsReplyEvent {
+  type: "columns_reply";
+  request_id: string;
+  name: string;
+  columns: string[];
+}
+
+export interface PeerInfo {
+  client_id: string;
+  name: string;
+  color: string;
+}
+
+export interface DocOpEvent {
+  type: "doc_op";
+  op: Record<string, unknown>;
+}
+
+export interface PresenceEvent {
+  type: "presence";
+  peers: PeerInfo[];
+}
+
+// ipywidgets comm messages, kernel -> browser. buffers are base64 strings.
+export interface CommOpenEvent {
+  type: "comm_open";
+  comm_id: string;
+  target_name: string;
+  data: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  buffers: string[];
+}
+
+export interface CommMsgEvent {
+  type: "comm_msg";
+  comm_id: string;
+  data: Record<string, unknown>;
+  buffers: string[];
+}
+
+export interface CommCloseEvent {
+  type: "comm_close";
+  comm_id: string;
+  data: Record<string, unknown>;
+}
+
 export type ClientEvent =
   | StatusEvent
   | ExecInputEvent
@@ -116,4 +256,12 @@ export type ClientEvent =
   | ClearOutputEvent
   | KernelStatusEvent
   | CompleteReplyEvent
-  | InspectReplyEvent;
+  | InspectReplyEvent
+  | VariablesReplyEvent
+  | VariableChildrenReplyEvent
+  | ColumnsReplyEvent
+  | DocOpEvent
+  | PresenceEvent
+  | CommOpenEvent
+  | CommMsgEvent
+  | CommCloseEvent;

@@ -57,6 +57,89 @@ class InspectRequest(BaseModel):
     detail_level: int = 0
 
 
+class VariablesRequest(BaseModel):
+    """Ask the kernel to introspect its user-defined globals (var explorer)."""
+
+    type: Literal["variables_request"] = "variables_request"
+    request_id: str
+
+
+class DeleteVariableRequest(BaseModel):
+    """Delete one global from the kernel, then re-introspect (var explorer)."""
+
+    type: Literal["delete_variable_request"] = "delete_variable_request"
+    request_id: str
+    name: str
+
+
+class VariableChildrenRequest(BaseModel):
+    """Ask the kernel for one container global's direct children (explorer expand)."""
+
+    type: Literal["variable_children_request"] = "variable_children_request"
+    request_id: str
+    name: str
+
+
+class SetVariableRequest(BaseModel):
+    """Bind a global to a scalar value, then re-introspect (input blocks).
+
+    The value is a JSON scalar; the server turns it into a Python literal with
+    ``repr`` (so it can't inject) and the name is validated as an identifier.
+    """
+
+    type: Literal["set_variable_request"] = "set_variable_request"
+    request_id: str
+    name: str
+    value: bool | int | float | str
+
+
+class ColumnsRequest(BaseModel):
+    """Ask the kernel for a DataFrame's columns (chart-block pickers)."""
+
+    type: Literal["columns_request"] = "columns_request"
+    request_id: str
+    name: str
+
+
+class DocOpRequest(BaseModel):
+    """A document edit to relay to collaborators on the same notebook.
+
+    The ``op`` is opaque to the server — it just fans it out to the other
+    attached sockets; only the client interprets it (see the store's applyRemoteOp).
+    """
+
+    type: Literal["doc_op_request"] = "doc_op_request"
+    op: dict[str, Any]
+
+
+# ipywidgets uses the Jupyter *comm* protocol: the frontend widget manager and
+# the kernel-side Widget objects sync state by exchanging comm messages. These
+# three carry a frontend-originated comm message to the kernel's shell channel.
+# ``buffers`` are base64-encoded binary blobs (some widgets ship binary state).
+
+
+class CommOpenRequest(BaseModel):
+    type: Literal["comm_open_request"] = "comm_open_request"
+    comm_id: str
+    target_name: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    buffers: list[str] = Field(default_factory=list)
+
+
+class CommMsgRequest(BaseModel):
+    type: Literal["comm_msg_request"] = "comm_msg_request"
+    comm_id: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    buffers: list[str] = Field(default_factory=list)
+
+
+class CommCloseRequest(BaseModel):
+    type: Literal["comm_close_request"] = "comm_close_request"
+    comm_id: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 ClientRequest = Annotated[
     Union[
         ExecuteRequest,
@@ -64,6 +147,15 @@ ClientRequest = Annotated[
         RestartRequest,
         CompleteRequest,
         InspectRequest,
+        VariablesRequest,
+        DeleteVariableRequest,
+        VariableChildrenRequest,
+        SetVariableRequest,
+        ColumnsRequest,
+        DocOpRequest,
+        CommOpenRequest,
+        CommMsgRequest,
+        CommCloseRequest,
     ],
     Field(discriminator="type"),
 ]
@@ -151,6 +243,74 @@ class InspectReplyEvent(BaseModel):
     data: dict[str, Any]
 
 
+class VariablesReplyEvent(BaseModel):
+    """The kernel's current user-defined globals: ``{name, type, repr, size?}``."""
+
+    type: Literal["variables_reply"] = "variables_reply"
+    request_id: str
+    variables: list[dict[str, Any]]
+
+
+class VariableChildrenReplyEvent(BaseModel):
+    """One container's direct children: ``{key, type, repr, size?}`` per item."""
+
+    type: Literal["variable_children_reply"] = "variable_children_reply"
+    request_id: str
+    name: str
+    children: list[dict[str, Any]]
+
+
+class ColumnsReplyEvent(BaseModel):
+    """A DataFrame's column names, for chart blocks' X/Y pickers."""
+
+    type: Literal["columns_reply"] = "columns_reply"
+    request_id: str
+    name: str
+    columns: list[str]
+
+
+class DocOpEvent(BaseModel):
+    """A collaborator's document edit, relayed to the other attached sockets."""
+
+    type: Literal["doc_op"] = "doc_op"
+    op: dict[str, Any]
+
+
+class PresenceEvent(BaseModel):
+    """The current collaborators on a notebook: ``{client_id, name, color}`` each."""
+
+    type: Literal["presence"] = "presence"
+    peers: list[dict[str, Any]]
+
+
+# Kernel-originated comm messages (ipywidgets). These are *not* cell-scoped — a
+# widget model is global and may update from any cell's interaction — so they
+# broadcast to every attached socket and are routed by ``comm_id`` in the
+# frontend widget manager. ``buffers`` are base64-encoded.
+
+
+class CommOpenEvent(BaseModel):
+    type: Literal["comm_open"] = "comm_open"
+    comm_id: str
+    target_name: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    buffers: list[str] = Field(default_factory=list)
+
+
+class CommMsgEvent(BaseModel):
+    type: Literal["comm_msg"] = "comm_msg"
+    comm_id: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    buffers: list[str] = Field(default_factory=list)
+
+
+class CommCloseEvent(BaseModel):
+    type: Literal["comm_close"] = "comm_close"
+    comm_id: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 ClientEvent = Annotated[
     Union[
         StatusEvent,
@@ -162,6 +322,14 @@ ClientEvent = Annotated[
         KernelStatusEvent,
         CompleteReplyEvent,
         InspectReplyEvent,
+        VariablesReplyEvent,
+        VariableChildrenReplyEvent,
+        ColumnsReplyEvent,
+        DocOpEvent,
+        PresenceEvent,
+        CommOpenEvent,
+        CommMsgEvent,
+        CommCloseEvent,
     ],
     Field(discriminator="type"),
 ]
