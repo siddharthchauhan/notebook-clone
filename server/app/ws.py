@@ -21,6 +21,7 @@ import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import TypeAdapter, ValidationError
 
+from app.auth import token_ok
 from app.kernels.manager import registry
 from app.kernels.session import KernelSession
 from app.models import (
@@ -57,6 +58,10 @@ _PRESENCE_COLORS = [
 
 @router.websocket("/ws/{notebook_id}")
 async def notebook_ws(websocket: WebSocket, notebook_id: str) -> None:
+    # Enforce the shared token (if configured) before doing any work.
+    if not token_ok(websocket):
+        await websocket.close(code=1008, reason="unauthorized")
+        return
     await websocket.accept()
     kernel_name = websocket.query_params.get("kernel") or None
     logger.info("ws open: notebook=%s kernel=%s", notebook_id, kernel_name)

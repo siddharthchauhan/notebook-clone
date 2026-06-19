@@ -129,8 +129,18 @@ back to the browser, **correctly correlated by cell**.
 - **Scheduled runs**: an **Auto-run** control (off / 5s / 30s / 1m) re-runs the
   whole notebook on an interval — turn it on in app view for a live dashboard that
   refreshes itself.
+
+**Phase 8 — access control**
+
+- **Shared-token auth**: set `NBCLONE_AUTH_TOKEN` to gate the API and WebSocket
+  behind a token (`Authorization: Bearer …` for REST, `?token=` for the WS). A
+  fetch interceptor injects it into every `/api` call and a login gate prompts for
+  it. **Off by default** — with no token configured the app is open, so dev, the
+  test suite, and the e2e run are unaffected (same degrade-gracefully pattern as
+  AI). `GET /api/auth` reports whether a token is required.
 - _Remaining toward full Deepnote parity_: conflict-free (CRDT) merge for
-  simultaneous edits to the same cell, and auth/sharing.
+  simultaneous edits to the **same** cell (today it's last-writer-wins per cell),
+  and multi-user identity / per-notebook sharing roles.
 
 ## Architecture
 
@@ -183,9 +193,10 @@ server/                FastAPI + jupyter_client backend (Python 3.12, uv)
     charts.py          no-code chart spec -> matplotlib (/api/charts)
     kpi.py             big-number block: expression -> HTML (/api/kpi)
     comments.py        per-cell comment threads (JSON sidecar + REST)
+    auth.py            optional shared-token gate (/api/auth)
     ws.py              /ws/{notebook_id}: attach, dispatch, detach
     main.py            app wiring, CORS, lifespan (shutdown_all)
-  tests/               88 pytest: Phase 1 criteria + persistence/interrupt/
+  tests/               91 pytest: Phase 1 criteria + persistence/interrupt/
                        restart/complete/inspect + document round-trip + WS +
                        AI (prompt/echo/status/SSE/chat) + variables + notebooks
                        + export + widgets (comm relay) + connectors + blocks
@@ -201,6 +212,7 @@ web/                   Vite + React + TypeScript frontend
     lib/reactive.ts    dependency graph + reactive re-run orchestration
     lib/run.ts         shared block compile + run-all (also scheduled runs)
     lib/comments.ts    per-cell comment REST helpers
+    lib/auth.ts        shared-token storage + /api fetch interceptor
     lib/document.ts    document, kernelspecs, notebooks, export REST helpers
     lib/ai.ts          AI status + SSE-over-fetch streamer (complete + chat)
     components/        Editor, Cell, Toolbar, AiAssist (per-cell ✨ AI),
@@ -243,7 +255,7 @@ Shift+Tab on a symbol for docs.
 ## Verification
 
 ```bash
-cd server && uv run pytest        # 88 passed (headless, real kernel)
+cd server && uv run pytest        # 91 passed (headless, real kernel)
 
 cd web && npm run build           # typecheck + production build
 # Optional headless-browser smoke test. Start the server with

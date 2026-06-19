@@ -44,5 +44,12 @@ class Settings(BaseSettings):
     # network or key — used by the test suite and the headless e2e run.
     ai_provider: str = "auto"
 
+    # -- access control (Phase 8) --------------------------------------- #
+    # A shared access token gating the API + WebSocket. When empty (the default)
+    # auth is OFF — the app is open, so dev, tests, and the e2e run are
+    # unaffected. Set ``NBCLONE_AUTH_TOKEN`` to require it; clients then send it
+    # as ``Authorization: Bearer <token>`` (REST) or ``?token=`` (WebSocket).
+    auth_token: str = ""
+
 
 settings = Settings()

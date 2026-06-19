@@ -8,6 +8,7 @@ import type {
   VariablesReplyEvent,
 } from "./protocol";
 import { useStore, type DocOp } from "./store";
+import { getToken } from "./auth";
 import { KernelWidgetManager } from "./widgets";
 
 type ReplyEvent =
@@ -49,6 +50,8 @@ export class NotebookSocket {
     const params = new URLSearchParams();
     if (this.kernelName) params.set("kernel", this.kernelName);
     if (this.name) params.set("name", this.name);
+    const token = getToken();
+    if (token) params.set("token", token);
     const q = params.toString() ? `?${params}` : "";
     const ws = new WebSocket(`${proto}://${location.host}/ws/${this.notebookId}${q}`);
     this.ws = ws;
