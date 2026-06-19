@@ -48,6 +48,17 @@ back to the browser, **correctly correlated by cell**.
 - **AI chat panel**: a conversational sidebar that streams Claude replies with the
   current notebook as context (complements the per-cell actions).
 
+**Phase 5 — interactivity & data**
+
+- **Live ipywidgets**: interactive widgets (sliders, buttons, dropdowns, …)
+  render in cell outputs and stay in sync with the kernel. The Jupyter *comm*
+  protocol is relayed over the same WebSocket — kernel-originated
+  `comm_open`/`comm_msg`/`comm_close` broadcast to every socket (a widget model
+  isn't owned by a cell, so it's routed by `comm_id`, not `cell_id`), and a
+  browser interaction sends `comm_msg` back on the shell channel. The frontend
+  embeds a live subclass of `@jupyter-widgets/html-manager`; binary widget state
+  travels as base64.
+
 ## Architecture
 
 ```
@@ -68,7 +79,9 @@ browser (Vite :5173)                      server (uvicorn :8000)
 Phase 4 adds `/api/notebooks` (list/create/delete), notebook export at
 `/api/contents/{id}/export/{ipynb,html}`, a `variables_request` over the same WS
 (its stdout captured by `msg_id`, parsed to a `variables_reply`), and the chat
-endpoint `/api/ai/chat` — all on the existing spine.
+endpoint `/api/ai/chat` — all on the existing spine. Phase 5 relays the Jupyter
+**comm** protocol over the same WS (kernel comm messages broadcast globally;
+browser comm messages sent on the shell channel) for live ipywidgets.
 
 **The crux (unchanged since Phase 1).** A kernel knows nothing about "cells".
 Every output carries a `parent_header.msg_id` pointing back to the
@@ -94,21 +107,22 @@ server/                FastAPI + jupyter_client backend (Python 3.12, uv)
                        api.py (status, /complete + /chat SSE)
     ws.py              /ws/{notebook_id}: attach, dispatch, detach
     main.py            app wiring, CORS, lifespan (shutdown_all)
-  tests/               51 pytest: Phase 1 criteria + persistence/interrupt/
+  tests/               53 pytest: Phase 1 criteria + persistence/interrupt/
                        restart/complete/inspect + document round-trip + WS +
                        AI (prompt/echo/status/SSE/chat) + variables + notebooks
-                       + export
+                       + export + widgets (comm relay)
 web/                   Vite + React + TypeScript frontend
   src/
     lib/protocol.ts    TS mirror of models.py
     lib/store.ts       zustand: multi-cell, append-only streams, autosave rev
-    lib/ws.ts          WS client: reconnect + request/reply (complete/inspect/vars)
+    lib/ws.ts          WS client: reconnect + request/reply + comm relay
+    lib/widgets.ts     live ipywidgets manager (@jupyter-widgets/html-manager)
     lib/document.ts    document, kernelspecs, notebooks, export REST helpers
     lib/ai.ts          AI status + SSE-over-fetch streamer (complete + chat)
     components/        Editor, Cell, Toolbar, AiAssist (per-cell ✨ AI),
                        VariableExplorer, AiChat, NotebookBrowser, SidePanel,
                        outputs/ (rich MIME renderers)
-  e2e/run.mjs          Playwright smoke test of the live UI (24 checks)
+  e2e/run.mjs          Playwright smoke test of the live UI (25 checks)
 ```
 
 ## Quickstart
@@ -144,14 +158,14 @@ Shift+Tab on a symbol for docs.
 ## Verification
 
 ```bash
-cd server && uv run pytest        # 51 passed (headless, real kernel)
+cd server && uv run pytest        # 53 passed (headless, real kernel)
 
 cd web && npm run build           # typecheck + production build
 # Optional headless-browser smoke test. Start the server with
 # NBCLONE_AI_PROVIDER=echo so the AI flows run keyless; the e2e expects a fresh
 # starter, so clear server/notebooks/*.ipynb first if you've used the app:
 npx playwright install chromium
-npm run e2e                       # 24 checks, drives the real UI end-to-end
+npm run e2e                       # 25 checks, drives the real UI end-to-end
 ```
 
 The e2e check exercises markdown rendering, stdout, tracebacks, inline PNG,

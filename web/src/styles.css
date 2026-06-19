@@ -645,6 +645,14 @@ select {
   padding: 2px 8px;
   font-style: italic;
 }
+.output.widget {
+  margin: 4px 0;
+}
+.output.widget-missing {
+  color: var(--muted);
+  font-style: italic;
+  padding: 4px 0;
+}
 .var-inspect-panel {
   margin: 8px 10px;
   border: 1px solid var(--border);

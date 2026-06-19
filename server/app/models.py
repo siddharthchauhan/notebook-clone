@@ -80,6 +80,34 @@ class VariableChildrenRequest(BaseModel):
     name: str
 
 
+# ipywidgets uses the Jupyter *comm* protocol: the frontend widget manager and
+# the kernel-side Widget objects sync state by exchanging comm messages. These
+# three carry a frontend-originated comm message to the kernel's shell channel.
+# ``buffers`` are base64-encoded binary blobs (some widgets ship binary state).
+
+
+class CommOpenRequest(BaseModel):
+    type: Literal["comm_open_request"] = "comm_open_request"
+    comm_id: str
+    target_name: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    buffers: list[str] = Field(default_factory=list)
+
+
+class CommMsgRequest(BaseModel):
+    type: Literal["comm_msg_request"] = "comm_msg_request"
+    comm_id: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    buffers: list[str] = Field(default_factory=list)
+
+
+class CommCloseRequest(BaseModel):
+    type: Literal["comm_close_request"] = "comm_close_request"
+    comm_id: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 ClientRequest = Annotated[
     Union[
         ExecuteRequest,
@@ -90,6 +118,9 @@ ClientRequest = Annotated[
         VariablesRequest,
         DeleteVariableRequest,
         VariableChildrenRequest,
+        CommOpenRequest,
+        CommMsgRequest,
+        CommCloseRequest,
     ],
     Field(discriminator="type"),
 ]
@@ -194,6 +225,34 @@ class VariableChildrenReplyEvent(BaseModel):
     children: list[dict[str, Any]]
 
 
+# Kernel-originated comm messages (ipywidgets). These are *not* cell-scoped — a
+# widget model is global and may update from any cell's interaction — so they
+# broadcast to every attached socket and are routed by ``comm_id`` in the
+# frontend widget manager. ``buffers`` are base64-encoded.
+
+
+class CommOpenEvent(BaseModel):
+    type: Literal["comm_open"] = "comm_open"
+    comm_id: str
+    target_name: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    buffers: list[str] = Field(default_factory=list)
+
+
+class CommMsgEvent(BaseModel):
+    type: Literal["comm_msg"] = "comm_msg"
+    comm_id: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    buffers: list[str] = Field(default_factory=list)
+
+
+class CommCloseEvent(BaseModel):
+    type: Literal["comm_close"] = "comm_close"
+    comm_id: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
 ClientEvent = Annotated[
     Union[
         StatusEvent,
@@ -207,6 +266,9 @@ ClientEvent = Annotated[
         InspectReplyEvent,
         VariablesReplyEvent,
         VariableChildrenReplyEvent,
+        CommOpenEvent,
+        CommMsgEvent,
+        CommCloseEvent,
     ],
     Field(discriminator="type"),
 ]

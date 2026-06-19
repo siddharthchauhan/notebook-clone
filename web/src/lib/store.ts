@@ -164,6 +164,14 @@ export const useStore = create<NotebookStore>((set, get) => ({
       event.type === "variable_children_reply"
     )
       return;
+    // ipywidgets comm events are handled by the widget manager (see ws.ts),
+    // never the cell store.
+    if (
+      event.type === "comm_open" ||
+      event.type === "comm_msg" ||
+      event.type === "comm_close"
+    )
+      return;
     if (event.cell_id == null) return;
     const cellId = event.cell_id;
 

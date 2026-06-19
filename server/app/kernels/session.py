@@ -21,6 +21,7 @@ restart *pauses the pumps*, waits cleanly, then resumes them.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -30,6 +31,9 @@ from jupyter_client import AsyncKernelManager
 from app.config import settings
 from app.kernels.translate import to_client_event
 from app.models import (
+    CommCloseEvent,
+    CommMsgEvent,
+    CommOpenEvent,
     CompleteReplyEvent,
     InspectReplyEvent,
     KernelStatusEvent,
@@ -236,6 +240,48 @@ class KernelSession:
             prefix = f"try:\n    del {name}\nexcept Exception:\n    pass\n"
         return self._run_variables(request_id, prefix + _VARIABLES_SCRIPT)
 
+    # ----------------------------------------------------------------- #
+    # comm protocol (ipywidgets): frontend -> kernel, on the shell channel
+    # ----------------------------------------------------------------- #
+    def comm_open(
+        self,
+        comm_id: str,
+        target_name: str,
+        data: dict,
+        metadata: dict,
+        buffers: list[str],
+    ) -> str:
+        return self._send_comm(
+            "comm_open",
+            {"comm_id": comm_id, "target_name": target_name, "data": data},
+            metadata,
+            buffers,
+        )
+
+    def comm_msg(self, comm_id: str, data: dict, buffers: list[str]) -> str:
+        return self._send_comm("comm_msg", {"comm_id": comm_id, "data": data}, None, buffers)
+
+    def comm_close(self, comm_id: str, data: dict) -> str:
+        return self._send_comm("comm_close", {"comm_id": comm_id, "data": data}, None, None)
+
+    def _send_comm(
+        self,
+        msg_type: str,
+        content: dict,
+        metadata: dict | None = None,
+        buffers: list[str] | None = None,
+    ) -> str:
+        if self.kc is None:
+            raise RuntimeError("kernel session not started")
+        msg = self.kc.session.msg(msg_type, content)
+        if metadata:
+            msg["metadata"] = {**msg.get("metadata", {}), **metadata}
+        if buffers:
+            # buffers travel as base64 over the JSON socket; the kernel wants bytes.
+            msg["buffers"] = [base64.b64decode(b) for b in buffers]
+        self.kc.shell_channel.send(msg)
+        return msg["header"]["msg_id"]
+
     def variable_children(self, request_id: str, name: str) -> str:
         """List the direct children of one container global (explorer expand)."""
         if name.isidentifier():
@@ -327,6 +373,15 @@ class KernelSession:
             msg_type = msg["header"]["msg_type"]
             content = msg["content"]
 
+            # ipywidgets comm traffic is global — a widget model is not owned by
+            # any one cell — so forward it to every socket (keyed by comm_id on
+            # the client), base64-ing any binary buffers.
+            if msg_type in ("comm_open", "comm_msg", "comm_close"):
+                await self._handle_comm_iopub(
+                    msg_type, content, msg.get("metadata", {}), msg.get("buffers", [])
+                )
+                continue
+
             # Variable-explorer introspection is diverted, never broadcast as
             # cell output: buffer its stdout, then parse + reply on idle.
             if parent_id in self.var_requests:
@@ -345,6 +400,26 @@ class KernelSession:
                 and parent_id in self.msg_to_cell
             ):
                 del self.msg_to_cell[parent_id]
+
+    async def _handle_comm_iopub(
+        self, msg_type: str, content: dict, metadata: dict, buffers: list
+    ) -> None:
+        """Forward one kernel-originated comm message to all sockets."""
+        b64 = [base64.b64encode(bytes(b)).decode("ascii") for b in buffers]
+        comm_id = content.get("comm_id", "")
+        if msg_type == "comm_open":
+            event = CommOpenEvent(
+                comm_id=comm_id,
+                target_name=content.get("target_name", ""),
+                data=content.get("data", {}),
+                metadata=metadata,
+                buffers=b64,
+            )
+        elif msg_type == "comm_msg":
+            event = CommMsgEvent(comm_id=comm_id, data=content.get("data", {}), buffers=b64)
+        else:
+            event = CommCloseEvent(comm_id=comm_id, data=content.get("data", {}))
+        await self._broadcast(event.model_dump())
 
     async def _handle_var_capture(
         self, parent_id: str, msg_type: str, content: dict

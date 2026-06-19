@@ -1,23 +1,40 @@
+import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import katex from "katex";
 import type { Output } from "../../lib/store";
+import type { KernelWidgetManager } from "../../lib/widgets";
 import { ansiToHtml, stripAnsi } from "../../lib/ansi";
 
+const WIDGET_VIEW = "application/vnd.jupyter.widget-view+json";
+
 // Full Phase 2 MIME set: text/html, image/svg+xml, image/png|jpeg, text/latex,
-// application/json, text/plain — plus stream and error outputs. For a display
-// bundle we render the single richest representation, mirroring Jupyter.
-export function OutputView({ outputs }: { outputs: Output[] }) {
+// application/json, text/plain — plus stream and error outputs, and live
+// ipywidgets views. For a display bundle we render the single richest
+// representation, mirroring Jupyter.
+export function OutputView({
+  outputs,
+  manager,
+}: {
+  outputs: Output[];
+  manager?: KernelWidgetManager;
+}) {
   if (outputs.length === 0) return null;
   return (
     <div className="outputs">
       {outputs.map((output, i) => (
-        <OutputItem key={i} output={output} />
+        <OutputItem key={i} output={output} manager={manager} />
       ))}
     </div>
   );
 }
 
-function OutputItem({ output }: { output: Output }) {
+function OutputItem({
+  output,
+  manager,
+}: {
+  output: Output;
+  manager?: KernelWidgetManager;
+}) {
   switch (output.kind) {
     case "stream":
       return <pre className={`output stream ${output.name}`}>{output.text}</pre>;
@@ -34,8 +51,56 @@ function OutputItem({ output }: { output: Output }) {
         />
       );
     case "display":
-      return <DisplayOutput data={output.data} />;
+      return <DisplayOutput data={output.data} manager={manager} />;
   }
+}
+
+// Mounts a live ipywidgets view for a model the manager already knows about
+// (created from the kernel's comm_open). A persisted widget output whose model
+// no longer exists (e.g. after reload without re-running) shows a hint.
+function WidgetOutput({
+  manager,
+  modelId,
+}: {
+  manager: KernelWidgetManager;
+  modelId: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    let view: { remove?: () => void } | undefined;
+    (async () => {
+      try {
+        const model = await manager.get_model(modelId);
+        if (disposed || !ref.current) return;
+        view = await manager.create_view(model);
+        if (disposed) {
+          view?.remove?.();
+          return;
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await manager.display_view(view as any, ref.current);
+      } catch {
+        if (!disposed) setFailed(true);
+      }
+    })();
+    return () => {
+      disposed = true;
+      try {
+        view?.remove?.();
+      } catch {
+        /* already gone */
+      }
+    };
+  }, [manager, modelId]);
+
+  if (failed) {
+    return (
+      <div className="output widget-missing">⚠ widget unavailable — re-run the cell</div>
+    );
+  }
+  return <div className="output widget jupyter-widgets" ref={ref} />;
 }
 
 function asString(v: unknown): string {
@@ -51,7 +116,19 @@ function stripLatexDelims(s: string): string {
   return t;
 }
 
-function DisplayOutput({ data }: { data: Record<string, unknown> }) {
+function DisplayOutput({
+  data,
+  manager,
+}: {
+  data: Record<string, unknown>;
+  manager?: KernelWidgetManager;
+}) {
+  // A live widget view takes precedence over the text/plain fallback ipywidgets
+  // also ships in the bundle.
+  if (WIDGET_VIEW in data && manager) {
+    const mv = data[WIDGET_VIEW] as { model_id?: string };
+    if (mv?.model_id) return <WidgetOutput manager={manager} modelId={mv.model_id} />;
+  }
   if ("text/html" in data) {
     const html = DOMPurify.sanitize(asString(data["text/html"]));
     return <div className="output html" dangerouslySetInnerHTML={{ __html: html }} />;

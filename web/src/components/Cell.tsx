@@ -63,7 +63,9 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
           </div>
         )}
 
-        {cell.cell_type === "code" && <OutputView outputs={cell.outputs} />}
+        {cell.cell_type === "code" && (
+          <OutputView outputs={cell.outputs} manager={socket.widgets} />
+        )}
 
         <AiAssist cell={cell} />
       </div>

@@ -24,6 +24,9 @@ from app.kernels.manager import registry
 from app.kernels.session import KernelSession
 from app.models import (
     ClientRequest,
+    CommCloseRequest,
+    CommMsgRequest,
+    CommOpenRequest,
     CompleteRequest,
     DeleteVariableRequest,
     ExecuteRequest,
@@ -98,6 +101,18 @@ async def _dispatch(session: KernelSession, request: ClientRequest) -> None:
         session.delete_variable(request.request_id, request.name)
     elif isinstance(request, VariableChildrenRequest):
         session.variable_children(request.request_id, request.name)
+    elif isinstance(request, CommOpenRequest):
+        session.comm_open(
+            request.comm_id,
+            request.target_name,
+            request.data,
+            request.metadata,
+            request.buffers,
+        )
+    elif isinstance(request, CommMsgRequest):
+        session.comm_msg(request.comm_id, request.data, request.buffers)
+    elif isinstance(request, CommCloseRequest):
+        session.comm_close(request.comm_id, request.data)
     elif isinstance(request, InterruptRequest):
         await session.interrupt()
     elif isinstance(request, RestartRequest):

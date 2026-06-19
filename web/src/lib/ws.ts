@@ -7,6 +7,7 @@ import type {
   VariablesReplyEvent,
 } from "./protocol";
 import { useStore } from "./store";
+import { KernelWidgetManager } from "./widgets";
 
 type ReplyEvent =
   | CompleteReplyEvent
@@ -26,10 +27,13 @@ export class NotebookSocket {
   private reconnectAttempts = 0;
   private reconnectTimer: number | null = null;
   private readonly pending = new Map<string, (event: ReplyEvent) => void>();
+  // Live ipywidgets manager for this notebook; renders widget-view outputs.
+  readonly widgets: KernelWidgetManager;
 
   constructor(notebookId: string, kernelName: string | null = null) {
     this.notebookId = notebookId;
     this.kernelName = kernelName;
+    this.widgets = new KernelWidgetManager(this);
   }
 
   connect(): void {
@@ -62,6 +66,19 @@ export class NotebookSocket {
           this.pending.delete(event.request_id);
           resolve(event);
         }
+        return;
+      }
+      // ipywidgets comm traffic is routed to the widget manager, not the store.
+      if (event.type === "comm_open") {
+        this.widgets.onCommOpen(event);
+        return;
+      }
+      if (event.type === "comm_msg") {
+        this.widgets.onCommMsg(event);
+        return;
+      }
+      if (event.type === "comm_close") {
+        this.widgets.onCommClose(event);
         return;
       }
       useStore.getState().applyEvent(event);
@@ -169,6 +186,32 @@ export class NotebookSocket {
       request_id: crypto.randomUUID(),
       name,
     });
+  }
+
+  // --- comm protocol (ipywidgets), browser -> kernel; CommSink interface --- //
+  commOpen(
+    commId: string,
+    targetName: string,
+    data: Record<string, unknown>,
+    metadata: Record<string, unknown>,
+    buffers: string[],
+  ): void {
+    this.send({
+      type: "comm_open_request",
+      comm_id: commId,
+      target_name: targetName,
+      data,
+      metadata,
+      buffers,
+    });
+  }
+
+  commMsg(commId: string, data: Record<string, unknown>, buffers: string[]): void {
+    this.send({ type: "comm_msg_request", comm_id: commId, data, buffers });
+  }
+
+  commClose(commId: string, data: Record<string, unknown>): void {
+    this.send({ type: "comm_close_request", comm_id: commId, data });
   }
 
   close(): void {

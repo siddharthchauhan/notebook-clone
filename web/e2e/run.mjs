@@ -243,6 +243,19 @@ try {
     .catch(() => false);
   check("variable delete", deleted, "");
 
+  // 12f) ipywidgets: a live IntSlider renders, with its kernel-side value
+  // (exercises the full widget manager + comm_open round-trip in the browser).
+  await setSource(1, "import ipywidgets as w\nslider = w.IntSlider(value=5)\nslider");
+  await runAndWaitIdle(page.locator(".cell.code").first(), 1);
+  const widgetReadout = await page
+    .locator(".jupyter-widgets .widget-readout")
+    .filter({ hasText: "5" })
+    .first()
+    .waitFor({ timeout: 15000 })
+    .then(() => true)
+    .catch(() => false);
+  check("ipywidgets slider renders", widgetReadout, "");
+
   // 13) export endpoints (.ipynb + HTML)
   const ipynbResp = await page.request.get(`${BASE}/api/contents/default/export/ipynb`);
   check(
