@@ -756,6 +756,13 @@ select {
   padding: 4px 8px;
   white-space: pre-wrap;
 }
+.btn-reactive.on {
+  background: #fde68a;
+  border-color: #f59e0b;
+  color: #7c2d12;
+  font-weight: 600;
+}
+
 /* input blocks (no-code controls bound to a kernel variable) */
 .input-block {
   border: 1px solid var(--border);

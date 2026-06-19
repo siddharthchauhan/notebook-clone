@@ -82,9 +82,18 @@ back to the browser, **correctly correlated by cell**.
   it never advances the `[n]` prompt or leaks output — and the explorer refreshes
   to show the new value. The value is sent as a JSON scalar and emitted server-side
   via `repr`, so it can't inject code.
-- _Roadmap toward Deepnote parity_: reactive execution (auto-re-run blocks when an
-  input/dependency changes), chart & big-number blocks, an app/dashboard view,
-  comments, and real-time collaboration.
+- **Reactive execution** (opt-in **⚡ Reactive** toggle): when a block changes,
+  the blocks that depend on it re-run automatically — change a slider and every
+  chart/table built from it refreshes. Dependencies come from each block's
+  read/write sets: code is analyzed server-side with Python's `ast` (`/api/analyze`
+  — proper scope handling so function locals/params and comprehension vars aren't
+  mistaken for dependencies), while SQL/input blocks declare their one write. A
+  block B is downstream of A when B reads a name A writes, computed transitively in
+  notebook order; dependents are enqueued after the trigger and the kernel's FIFO
+  shell channel guarantees they see the new values. Off by default, so normal
+  run-when-you-say-so behavior is unchanged.
+- _Roadmap toward Deepnote parity_: chart & big-number blocks, an app/dashboard
+  view, comments, and real-time collaboration.
 
 ## Architecture
 
@@ -133,9 +142,10 @@ server/                FastAPI + jupyter_client backend (Python 3.12, uv)
     ai/                AI assist: service.py (prompts + pluggable provider),
                        api.py (status, /complete + /chat SSE)
     connectors/        data-source registry + /api/connectors (codegen)
+    analysis.py        AST read/write analysis + /api/analyze (reactive deps)
     ws.py              /ws/{notebook_id}: attach, dispatch, detach
     main.py            app wiring, CORS, lifespan (shutdown_all)
-  tests/               64 pytest: Phase 1 criteria + persistence/interrupt/
+  tests/               69 pytest: Phase 1 criteria + persistence/interrupt/
                        restart/complete/inspect + document round-trip + WS +
                        AI (prompt/echo/status/SSE/chat) + variables + notebooks
                        + export + widgets (comm relay) + connectors + blocks
@@ -146,13 +156,14 @@ web/                   Vite + React + TypeScript frontend
     lib/ws.ts          WS client: reconnect + request/reply + comm relay
     lib/widgets.ts     live ipywidgets manager (@jupyter-widgets/html-manager)
     lib/connectors.ts  data-connector catalog + codegen REST helpers
+    lib/reactive.ts    dependency graph + reactive re-run orchestration
     lib/document.ts    document, kernelspecs, notebooks, export REST helpers
     lib/ai.ts          AI status + SSE-over-fetch streamer (complete + chat)
     components/        Editor, Cell, Toolbar, AiAssist (per-cell ✨ AI),
                        VariableExplorer, DataConnectors, AiChat, NotebookBrowser,
                        SidePanel,
                        outputs/ (rich MIME renderers)
-  e2e/run.mjs          Playwright smoke test of the live UI (28 checks)
+  e2e/run.mjs          Playwright smoke test of the live UI (29 checks)
 ```
 
 ## Quickstart
@@ -188,14 +199,14 @@ Shift+Tab on a symbol for docs.
 ## Verification
 
 ```bash
-cd server && uv run pytest        # 64 passed (headless, real kernel)
+cd server && uv run pytest        # 69 passed (headless, real kernel)
 
 cd web && npm run build           # typecheck + production build
 # Optional headless-browser smoke test. Start the server with
 # NBCLONE_AI_PROVIDER=echo so the AI flows run keyless; the e2e expects a fresh
 # starter, so clear server/notebooks/*.ipynb first if you've used the app:
 npx playwright install chromium
-npm run e2e                       # 28 checks, drives the real UI end-to-end
+npm run e2e                       # 29 checks, drives the real UI end-to-end
 ```
 
 The e2e check exercises markdown rendering, stdout, tracebacks, inline PNG,

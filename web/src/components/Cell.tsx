@@ -12,6 +12,7 @@ import { Editor } from "./Editor";
 import { OutputView } from "./outputs";
 import { AiAssist } from "./AiAssist";
 import { generateConnectorCode } from "../lib/connectors";
+import { reactiveRerun } from "../lib/reactive";
 import { renderMarkdown } from "../lib/markdown";
 import { stripAnsi } from "../lib/ansi";
 
@@ -31,6 +32,7 @@ async function bindInput(cellId: string, socket: NotebookSocket) {
   try {
     await socket.setVariable(name, (m.value ?? "") as boolean | number | string);
     useStore.getState().touchVariables();
+    void reactiveRerun(cellId, socket); // re-run cells that read this variable
   } catch {
     /* a failed bind is non-fatal; the next change retries */
   }
@@ -69,6 +71,7 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
       st.clearOutputs(cellId);
       st.markQueued(cellId);
       socket.execute(cellId, code);
+      void reactiveRerun(cellId, socket); // re-run cells that read this DataFrame
     } catch (e) {
       setSqlError(e instanceof Error ? e.message : "could not run query");
     }
@@ -96,6 +99,7 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
     state.clearOutputs(cellId);
     state.markQueued(cellId);
     socket.execute(cellId, latest.source);
+    void reactiveRerun(cellId, socket); // re-run dependents of this cell's writes
   };
 
   const showRenderedMarkdown = cell.cell_type === "markdown" && cell.rendered;

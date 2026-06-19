@@ -86,8 +86,10 @@ interface NotebookStore {
   aiAvailable: boolean; // whether the server has AI assist configured
   revision: number; // bumps on persistable changes; drives autosave
   variablesRevision: number; // bumps when a binding changes the kernel silently
+  reactive: boolean; // when on, a block's dependents re-run after it changes
 
   setConnected: (connected: boolean) => void;
+  setReactive: (reactive: boolean) => void;
   touchVariables: () => void;
   setKernel: (status: KernelStatus, name?: string | null) => void;
   setAiAvailable: (available: boolean) => void;
@@ -122,8 +124,10 @@ export const useStore = create<NotebookStore>((set, get) => ({
   aiAvailable: false,
   revision: 0,
   variablesRevision: 0,
+  reactive: false,
 
   setConnected: (connected) => set({ connected }),
+  setReactive: (reactive) => set({ reactive }),
   touchVariables: () => set((s) => ({ variablesRevision: s.variablesRevision + 1 })),
   setKernel: (kernelStatus, name) =>
     set((s) => ({ kernelStatus, kernelName: name ?? s.kernelName })),

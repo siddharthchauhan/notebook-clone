@@ -341,6 +341,52 @@ try {
     .catch(() => false);
   check("input block binds variable", inputOk, "");
 
+  // 12j) reactive execution: changing an input re-runs the blocks that read it.
+  await page.evaluate(() => window.__store.getState().setReactive(true));
+  await page.locator(".btn-add-input").click();
+  await page.evaluate(() => {
+    const st = window.__store.getState();
+    const inp = st.cells[st.cells.length - 1];
+    st.setCellMetadata(inp.id, {
+      input_type: "slider",
+      var_name: "rx",
+      value: 5,
+      min: 0,
+      max: 100,
+      step: 1,
+    });
+  });
+  await page.locator(".cell.input .run-btn").last().click(); // bind rx = 5
+  await page.locator(".btn-add-cell").click();
+  const rxCodeIdx = await page.evaluate(() => {
+    const st = window.__store.getState();
+    const idx = st.cells.length - 1;
+    st.setSource(st.cells[idx].id, 'print("rx_is", rx)');
+    return idx;
+  });
+  await runAndWaitIdle(page.locator(".cell.code").last(), rxCodeIdx); // prints rx_is 5
+  // Change the input to 9 and re-bind; the dependent code cell should re-run.
+  await page.evaluate(() => {
+    const st = window.__store.getState();
+    const inp = st.cells.find(
+      (c) => c.cell_type === "input" && c.metadata && c.metadata.var_name === "rx",
+    );
+    st.setCellMetadata(inp.id, { value: 9 });
+  });
+  await page.locator(".cell.input .run-btn").last().click(); // bind rx = 9 → reactive re-run
+  const reactiveOk = await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll(".cell.code .outputs")].some(
+          (el) => el.textContent && el.textContent.includes("rx_is 9"),
+        ),
+      null,
+      { timeout: 15000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("reactive re-run on input change", reactiveOk, "");
+
   // 13) export endpoints (.ipynb + HTML)
   const ipynbResp = await page.request.get(`${BASE}/api/contents/default/export/ipynb`);
   check(

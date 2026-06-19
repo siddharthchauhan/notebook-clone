@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import ws
 from app.ai.api import router as ai_router
+from app.analysis import router as analysis_router
 from app.config import settings
 from app.connectors.api import router as connectors_router
 from app.contents.api import notebooks_router
@@ -48,6 +49,7 @@ app.include_router(notebooks_router)
 app.include_router(kernels_router)
 app.include_router(ai_router)
 app.include_router(connectors_router)
+app.include_router(analysis_router)
 app.include_router(ws.router)
 
 
