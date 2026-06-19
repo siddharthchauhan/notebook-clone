@@ -41,10 +41,15 @@ async function bindInput(cellId: string, socket: NotebookSocket) {
 
 export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocket }) {
   const cell = useStore((s) => s.cells.find((c) => c.id === cellId));
+  const appMode = useStore((s) => s.appMode);
   const [inspect, setInspect] = useState<string | null>(null);
   const [sqlError, setSqlError] = useState<string | null>(null);
   const [chartError, setChartError] = useState<string | null>(null);
   if (!cell) return null;
+
+  // App view: drop the editor + chrome; show only what an app would — rendered
+  // markdown, live input controls, and block outputs (charts, tables, prints).
+  if (appMode) return <AppCell cell={cell} socket={socket} />;
 
   // A chart block compiles to matplotlib (via /api/charts) and runs through the
   // normal execute path, so the figure renders inline like any plot.
@@ -190,6 +195,37 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
   );
 }
 
+// Presentation view of one cell: markdown reads as prose, inputs stay
+// interactive, and executable blocks show only their output. Cells with nothing
+// to present (e.g. an empty or output-less code cell) render nothing.
+function AppCell({ cell, socket }: { cell: CellState; socket: NotebookSocket }) {
+  if (cell.cell_type === "markdown") {
+    if (!cell.source.trim()) return null;
+    return (
+      <div className="app-cell markdown">
+        <div
+          className="markdown-rendered"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(cell.source) }}
+        />
+      </div>
+    );
+  }
+  if (cell.cell_type === "input") {
+    return (
+      <div className="app-cell input">
+        <InputBlock cellId={cell.id} metadata={cell.metadata} socket={socket} compact />
+      </div>
+    );
+  }
+  // code / sql / chart: present the output, or nothing if there isn't one yet.
+  if (!cell.outputs.length) return null;
+  return (
+    <div className={`app-cell ${cell.cell_type}`}>
+      <OutputView outputs={cell.outputs} manager={socket.widgets} />
+    </div>
+  );
+}
+
 // The SQL block's connection picker + target-variable field. Editing updates the
 // cell's block metadata (persisted in the .ipynb under cell metadata).
 function SqlConfig({ cellId, metadata }: { cellId: string; metadata?: CellMetadata }) {
@@ -248,10 +284,12 @@ function InputBlock({
   cellId,
   metadata,
   socket,
+  compact = false,
 }: {
   cellId: string;
   metadata?: CellMetadata;
   socket: NotebookSocket;
+  compact?: boolean;
 }) {
   const m = metadata ?? {};
   const inputType = (m.input_type ?? "text") as InputType;
@@ -316,6 +354,19 @@ function InputBlock({
           if (e.key === "Enter") commit();
         }}
       />
+    );
+  }
+
+  // App view shows just a labeled control — no type/variable/range editors.
+  if (compact) {
+    return (
+      <div className="input-block compact">
+        <label className="input-label">{varName}</label>
+        <div className="input-control">
+          {control}
+          <code className="input-value">{JSON.stringify(m.value ?? null)}</code>
+        </div>
+      </div>
     );
   }
 

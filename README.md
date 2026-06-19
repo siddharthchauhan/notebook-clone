@@ -100,7 +100,13 @@ back to the browser, **correctly correlated by cell**.
   transitively in notebook order; dependents are enqueued after the trigger and the
   kernel's FIFO shell channel guarantees they see the new values. Off by default,
   so normal run-when-you-say-so behavior is unchanged.
-- _Roadmap toward Deepnote parity_: big-number/KPI blocks, an app/dashboard view,
+- **App / dashboard view** (📊 **App** toggle): flips the notebook into a clean
+  presentation — code, editors, and toolbars disappear, leaving rendered markdown,
+  **interactive input controls**, and block outputs (charts, tables, prints).
+  Entering app view turns reactivity on, so moving a slider re-runs its dependents
+  and the dashboard updates live. Output-less cells are simply hidden. It's a pure
+  view over the same notebook — toggle back and every editor returns untouched.
+- _Roadmap toward Deepnote parity_: big-number/KPI blocks, scheduled runs,
   comments, and real-time collaboration.
 
 ## Architecture
@@ -173,7 +179,7 @@ web/                   Vite + React + TypeScript frontend
                        VariableExplorer, DataConnectors, AiChat, NotebookBrowser,
                        SidePanel,
                        outputs/ (rich MIME renderers)
-  e2e/run.mjs          Playwright smoke test of the live UI (30 checks)
+  e2e/run.mjs          Playwright smoke test of the live UI (32 checks)
 ```
 
 ## Quickstart
@@ -216,7 +222,7 @@ cd web && npm run build           # typecheck + production build
 # NBCLONE_AI_PROVIDER=echo so the AI flows run keyless; the e2e expects a fresh
 # starter, so clear server/notebooks/*.ipynb first if you've used the app:
 npx playwright install chromium
-npm run e2e                       # 30 checks, drives the real UI end-to-end
+npm run e2e                       # 32 checks, drives the real UI end-to-end
 ```
 
 The e2e check exercises markdown rendering, stdout, tracebacks, inline PNG,

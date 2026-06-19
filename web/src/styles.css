@@ -762,6 +762,39 @@ select {
   color: #7c2d12;
   font-weight: 600;
 }
+.btn-appmode.on {
+  background: #d1fae5;
+  border-color: #10b981;
+  color: #065f46;
+  font-weight: 600;
+}
+
+/* app view: a clean dashboard — no cell chrome, generous spacing */
+.notebook.app {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+.app-cell {
+  margin: 0 0 20px;
+}
+.app-cell.input {
+  max-width: 460px;
+}
+.app-cell .input-block.compact {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+.input-label {
+  font-weight: 600;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 13px;
+  min-width: 80px;
+}
 
 /* input blocks (no-code controls bound to a kernel variable) */
 .input-block {

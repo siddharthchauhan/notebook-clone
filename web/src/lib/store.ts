@@ -96,9 +96,11 @@ interface NotebookStore {
   revision: number; // bumps on persistable changes; drives autosave
   variablesRevision: number; // bumps when a binding changes the kernel silently
   reactive: boolean; // when on, a block's dependents re-run after it changes
+  appMode: boolean; // presentation view: hide code/chrome, show outputs + inputs
 
   setConnected: (connected: boolean) => void;
   setReactive: (reactive: boolean) => void;
+  setAppMode: (appMode: boolean) => void;
   touchVariables: () => void;
   setKernel: (status: KernelStatus, name?: string | null) => void;
   setAiAvailable: (available: boolean) => void;
@@ -134,9 +136,12 @@ export const useStore = create<NotebookStore>((set, get) => ({
   revision: 0,
   variablesRevision: 0,
   reactive: false,
+  appMode: false,
 
   setConnected: (connected) => set({ connected }),
   setReactive: (reactive) => set({ reactive }),
+  // Entering app view turns on reactivity so inputs drive the dashboard live.
+  setAppMode: (appMode) => set((s) => ({ appMode, reactive: appMode || s.reactive })),
   touchVariables: () => set((s) => ({ variablesRevision: s.variablesRevision + 1 })),
   setKernel: (kernelStatus, name) =>
     set((s) => ({ kernelStatus, kernelName: name ?? s.kernelName })),

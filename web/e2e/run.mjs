@@ -419,6 +419,32 @@ try {
     .catch(() => false);
   check("chart block renders a figure", chartImg, "");
 
+  // 12l) app view: hide code + chrome, keep inputs live and show block outputs.
+  await page.locator(".btn-appmode").click();
+  const appView = await page.evaluate(() => ({
+    appCells: document.querySelectorAll(".app-cell").length,
+    editors: document.querySelectorAll(".cm-host").length,
+    addBtn: document.querySelectorAll(".btn-add-cell").length,
+    inputs: document.querySelectorAll(".input-block.compact").length,
+    chartImg: !!document.querySelector(".app-cell.chart img.output.image"),
+  }));
+  check(
+    "app view: editors + chrome hidden",
+    appView.editors === 0 && appView.addBtn === 0,
+    JSON.stringify(appView),
+  );
+  check(
+    "app view: inputs live + outputs shown",
+    appView.appCells > 0 && appView.inputs > 0 && appView.chartImg,
+    JSON.stringify(appView),
+  );
+  // Back to edit view; the editors should return.
+  await page.locator(".btn-appmode").click();
+  const editorsBack = await page.evaluate(
+    () => document.querySelectorAll(".cm-host").length,
+  );
+  check("edit view restores editors", editorsBack > 0, `editors=${editorsBack}`);
+
   // 13) export endpoints (.ipynb + HTML)
   const ipynbResp = await page.request.get(`${BASE}/api/contents/default/export/ipynb`);
   check(

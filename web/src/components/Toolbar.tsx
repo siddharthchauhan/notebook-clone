@@ -38,6 +38,7 @@ export function Toolbar({
   const kernelStatus = useStore((s) => s.kernelStatus);
   const aiAvailable = useStore((s) => s.aiAvailable);
   const reactive = useStore((s) => s.reactive);
+  const appMode = useStore((s) => s.appMode);
 
   // Run every block top-to-bottom, each by its kind: markdown renders, inputs
   // bind their variable, SQL compiles to pandas, code runs as-is. The kernel
@@ -121,23 +122,36 @@ export function Toolbar({
         ☰ {notebookId}
       </button>
 
+      <button
+        className={`btn-appmode${appMode ? " on" : ""}`}
+        onClick={() => useStore.getState().setAppMode(!appMode)}
+        title={appMode ? "Back to editing" : "App view: hide code, show the dashboard (reactive)"}
+      >
+        {appMode ? "✎ Edit" : "📊 App"}
+      </button>
+
       <div className="toolbar-group">
         <button onClick={runAll} title="Run all cells">⏩ Run all</button>
         <button onClick={() => socket.interrupt()} title="Interrupt the kernel">■ Interrupt</button>
         <button onClick={() => socket.restart()} title="Restart the kernel">⟳ Restart</button>
-        <button className="btn-add-cell" onClick={() => useStore.getState().addCell(null, "code")} title="Add a code cell">+ Cell</button>
-        <button className="btn-add-sql" onClick={() => useStore.getState().addCell(null, "sql")} title="Add a SQL block">+ SQL</button>
-        <button className="btn-add-input" onClick={() => useStore.getState().addCell(null, "input")} title="Add an input block">+ Input</button>
-        <button className="btn-add-chart" onClick={() => useStore.getState().addCell(null, "chart")} title="Add a chart block">+ Chart</button>
-        <button
-          className={`btn-reactive${reactive ? " on" : ""}`}
-          onClick={() => useStore.getState().setReactive(!reactive)}
-          title="Reactive mode: when a block changes, re-run the blocks that depend on it"
-        >
-          ⚡ Reactive{reactive ? " on" : ""}
-        </button>
+        {!appMode && (
+          <>
+            <button className="btn-add-cell" onClick={() => useStore.getState().addCell(null, "code")} title="Add a code cell">+ Cell</button>
+            <button className="btn-add-sql" onClick={() => useStore.getState().addCell(null, "sql")} title="Add a SQL block">+ SQL</button>
+            <button className="btn-add-input" onClick={() => useStore.getState().addCell(null, "input")} title="Add an input block">+ Input</button>
+            <button className="btn-add-chart" onClick={() => useStore.getState().addCell(null, "chart")} title="Add a chart block">+ Chart</button>
+            <button
+              className={`btn-reactive${reactive ? " on" : ""}`}
+              onClick={() => useStore.getState().setReactive(!reactive)}
+              title="Reactive mode: when a block changes, re-run the blocks that depend on it"
+            >
+              ⚡ Reactive{reactive ? " on" : ""}
+            </button>
+          </>
+        )}
       </div>
 
+      {!appMode && (
       <div className="toolbar-group">
         <button onClick={onCreateCheckpoint} title="Save a checkpoint">⚑ Checkpoint</button>
         <select
@@ -167,7 +181,9 @@ export function Toolbar({
           <option value="html">HTML</option>
         </select>
       </div>
+      )}
 
+      {!appMode && (
       <div className="toolbar-group">
         <button className="btn-variables" onClick={() => onTogglePanel("variables")} title="Variable explorer">
           🔎 Variables
@@ -181,6 +197,7 @@ export function Toolbar({
           </button>
         )}
       </div>
+      )}
 
       <span className="spacer" />
 
