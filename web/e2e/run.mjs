@@ -256,6 +256,31 @@ try {
     .catch(() => false);
   check("ipywidgets slider renders", widgetReadout, "");
 
+  // 12g) data connectors: create a SQLite DB, then load it via the connector UI
+  await setSource(
+    1,
+    "import sqlite3\n_c = sqlite3.connect('e2e_conn.db')\n_c.execute('DROP TABLE IF EXISTS t')\n_c.execute('CREATE TABLE t (x)')\n_c.execute('INSERT INTO t VALUES (4242)')\n_c.commit()\n_c.close()",
+  );
+  await runAndWaitIdle(page.locator(".cell.code").first(), 1);
+  await page.locator(".btn-data").click();
+  await page.selectOption(".conn-select", "sqlite");
+  await page.fill('.conn-field[name="db_path"]', "e2e_conn.db");
+  await page.fill('.conn-field[name="query"]', "SELECT x FROM t");
+  await page.fill('.conn-field[name="var"]', "conn_df");
+  await page.locator(".conn-load").click();
+  const connLoaded = await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll(".outputs")].some(
+          (el) => el.textContent && el.textContent.includes("4242"),
+        ),
+      null,
+      { timeout: 20000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("data connector loads sqlite", connLoaded, "");
+
   // 13) export endpoints (.ipynb + HTML)
   const ipynbResp = await page.request.get(`${BASE}/api/contents/default/export/ipynb`);
   check(

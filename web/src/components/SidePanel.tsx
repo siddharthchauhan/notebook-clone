@@ -1,12 +1,13 @@
 import { useStore } from "../lib/store";
 import type { NotebookSocket } from "../lib/ws";
 import { VariableExplorer } from "./VariableExplorer";
+import { DataConnectors } from "./DataConnectors";
 import { AiChat } from "./AiChat";
 
-export type PanelTab = "variables" | "chat";
+export type PanelTab = "variables" | "data" | "chat";
 
-// Right-hand dock hosting the Variable Explorer and the AI Chat as tabs. The
-// Chat tab only appears when the server has AI configured.
+// Right-hand dock hosting the Variable Explorer, Data connectors, and the AI
+// Chat as tabs. The Chat tab only appears when the server has AI configured.
 export function SidePanel({
   tab,
   onTab,
@@ -30,6 +31,12 @@ export function SidePanel({
         >
           Variables
         </button>
+        <button
+          className={`dock-tab ${active === "data" ? "active" : ""}`}
+          onClick={() => onTab("data")}
+        >
+          Data
+        </button>
         {aiAvailable && (
           <button
             className={`dock-tab ${active === "chat" ? "active" : ""}`}
@@ -44,7 +51,9 @@ export function SidePanel({
         </button>
       </div>
       <div className="dock-body">
-        {active === "variables" ? <VariableExplorer socket={socket} /> : <AiChat />}
+        {active === "variables" && <VariableExplorer socket={socket} />}
+        {active === "data" && <DataConnectors socket={socket} />}
+        {active === "chat" && <AiChat />}
       </div>
     </aside>
   );

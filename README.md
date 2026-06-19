@@ -58,6 +58,13 @@ back to the browser, **correctly correlated by cell**.
   browser interaction sends `comm_msg` back on the shell channel. The frontend
   embeds a live subclass of `@jupyter-widgets/html-manager`; binary widget state
   travels as base64.
+- **Data connectors**: a **Data** panel loads a source into a pandas DataFrame —
+  **SQLite**, **CSV/JSON files**, an **HTTP URL**, any **SQLAlchemy** database, or
+  **Parquet/Excel**. The server returns the loader code for the chosen params and
+  the UI drops it into a **new, editable cell** and runs it (transparent, not
+  hidden). The catalog reports which connectors' dependencies are installed;
+  params are interpolated as safe literals and the target variable is validated,
+  so a connector can't inject code. Adding a source is one entry in a registry.
 
 ## Architecture
 
@@ -81,7 +88,7 @@ Phase 4 adds `/api/notebooks` (list/create/delete), notebook export at
 (its stdout captured by `msg_id`, parsed to a `variables_reply`), and the chat
 endpoint `/api/ai/chat` — all on the existing spine. Phase 5 relays the Jupyter
 **comm** protocol over the same WS (kernel comm messages broadcast globally;
-browser comm messages sent on the shell channel) for live ipywidgets.
+browser comm messages sent on the shell channel) for live ipywidgets, and `/api/connectors` (catalog + loader-code generation).
 
 **The crux (unchanged since Phase 1).** A kernel knows nothing about "cells".
 Every output carries a `parent_header.msg_id` pointing back to the
@@ -105,24 +112,27 @@ server/                FastAPI + jupyter_client backend (Python 3.12, uv)
     contents/          nbformat <-> document mapping; autosave, notebooks, export
     ai/                AI assist: service.py (prompts + pluggable provider),
                        api.py (status, /complete + /chat SSE)
+    connectors/        data-source registry + /api/connectors (codegen)
     ws.py              /ws/{notebook_id}: attach, dispatch, detach
     main.py            app wiring, CORS, lifespan (shutdown_all)
-  tests/               53 pytest: Phase 1 criteria + persistence/interrupt/
+  tests/               61 pytest: Phase 1 criteria + persistence/interrupt/
                        restart/complete/inspect + document round-trip + WS +
                        AI (prompt/echo/status/SSE/chat) + variables + notebooks
-                       + export + widgets (comm relay)
+                       + export + widgets (comm relay) + connectors
 web/                   Vite + React + TypeScript frontend
   src/
     lib/protocol.ts    TS mirror of models.py
     lib/store.ts       zustand: multi-cell, append-only streams, autosave rev
     lib/ws.ts          WS client: reconnect + request/reply + comm relay
     lib/widgets.ts     live ipywidgets manager (@jupyter-widgets/html-manager)
+    lib/connectors.ts  data-connector catalog + codegen REST helpers
     lib/document.ts    document, kernelspecs, notebooks, export REST helpers
     lib/ai.ts          AI status + SSE-over-fetch streamer (complete + chat)
     components/        Editor, Cell, Toolbar, AiAssist (per-cell ✨ AI),
-                       VariableExplorer, AiChat, NotebookBrowser, SidePanel,
+                       VariableExplorer, DataConnectors, AiChat, NotebookBrowser,
+                       SidePanel,
                        outputs/ (rich MIME renderers)
-  e2e/run.mjs          Playwright smoke test of the live UI (25 checks)
+  e2e/run.mjs          Playwright smoke test of the live UI (26 checks)
 ```
 
 ## Quickstart
@@ -158,14 +168,14 @@ Shift+Tab on a symbol for docs.
 ## Verification
 
 ```bash
-cd server && uv run pytest        # 53 passed (headless, real kernel)
+cd server && uv run pytest        # 61 passed (headless, real kernel)
 
 cd web && npm run build           # typecheck + production build
 # Optional headless-browser smoke test. Start the server with
 # NBCLONE_AI_PROVIDER=echo so the AI flows run keyless; the e2e expects a fresh
 # starter, so clear server/notebooks/*.ipynb first if you've used the app:
 npx playwright install chromium
-npm run e2e                       # 25 checks, drives the real UI end-to-end
+npm run e2e                       # 26 checks, drives the real UI end-to-end
 ```
 
 The e2e check exercises markdown rendering, stdout, tracebacks, inline PNG,

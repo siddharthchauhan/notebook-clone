@@ -114,6 +114,9 @@ export function Toolbar({
         <button className="btn-variables" onClick={() => onTogglePanel("variables")} title="Variable explorer">
           🔎 Variables
         </button>
+        <button className="btn-data" onClick={() => onTogglePanel("data")} title="Load data">
+          🔌 Data
+        </button>
         {aiAvailable && (
           <button className="btn-chat" onClick={() => onTogglePanel("chat")} title="AI chat">
             ✨ Chat
