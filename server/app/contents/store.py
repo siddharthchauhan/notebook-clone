@@ -100,9 +100,14 @@ def _source_to_str(source: Any) -> str:
 def notebook_to_document(nb: NotebookNode) -> dict[str, Any]:
     cells = []
     for c in nb.cells:
-        cell_type = c.get("cell_type", "code")
+        nb_type = c.get("cell_type", "code")
+        # Block config (SQL/input/chart/… ) is stored under cell metadata so the
+        # file stays valid nbformat; block_type is surfaced as the client type.
+        meta = dict(c.get("metadata", {}).get("deepnote", {}))
+        block_type = meta.pop("block_type", None)
+        cell_type = block_type if block_type in ("sql",) else nb_type
         outputs = []
-        if cell_type == "code":
+        if nb_type == "code":
             outputs = [
                 mapped
                 for o in c.get("outputs", [])
@@ -115,6 +120,7 @@ def notebook_to_document(nb: NotebookNode) -> dict[str, Any]:
                 "source": _source_to_str(c.get("source", "")),
                 "outputs": outputs,
                 "execution_count": c.get("execution_count"),
+                "metadata": meta,
             }
         )
     return {"cells": cells, "metadata": dict(nb.get("metadata", {}))}
@@ -127,9 +133,11 @@ def document_to_notebook(doc: dict[str, Any]) -> NotebookNode:
 
     cells = []
     for c in doc.get("cells", []):
-        if c.get("cell_type") == "markdown":
+        ctype = c.get("cell_type")
+        if ctype == "markdown":
             cell = nbformat.v4.new_markdown_cell(source=c.get("source", ""))
         else:
+            # code and every non-markdown block (e.g. sql) persist as code cells.
             cell = nbformat.v4.new_code_cell(source=c.get("source", ""))
             cell.outputs = [
                 mapped
@@ -138,6 +146,12 @@ def document_to_notebook(doc: dict[str, Any]) -> NotebookNode:
             ]
             if c.get("execution_count") is not None:
                 cell.execution_count = c["execution_count"]
+        # Round-trip block type + config under cell metadata.
+        deepnote = {k: v for k, v in (c.get("metadata") or {}).items()}
+        if ctype not in ("code", "markdown"):
+            deepnote["block_type"] = ctype
+        if deepnote:
+            cell.metadata["deepnote"] = deepnote
         # Preserve the client's stable cell id (valid nbformat v4.5 id chars).
         if c.get("id"):
             cell["id"] = c["id"]

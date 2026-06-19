@@ -4,6 +4,7 @@ import { EditorView, keymap, type KeyBinding } from "@codemirror/view";
 import { basicSetup } from "codemirror";
 import { python } from "@codemirror/lang-python";
 import { markdown } from "@codemirror/lang-markdown";
+import { sql } from "@codemirror/lang-sql";
 import {
   autocompletion,
   type CompletionContext,
@@ -98,9 +99,7 @@ export function Editor({
       }),
     ];
     extensions.push(
-      cellType === "markdown"
-        ? markdown()
-        : python(),
+      cellType === "markdown" ? markdown() : cellType === "sql" ? sql() : python(),
     );
     if (cellType === "code") {
       extensions.push(autocompletion({ override: [kernelCompletions(socket)] }));

@@ -66,6 +66,19 @@ back to the browser, **correctly correlated by cell**.
   params are interpolated as safe literals and the target variable is validated,
   so a connector can't inject code. Adding a source is one entry in a registry.
 
+**Phase 6 — Deepnote-style blocks** ([deepnote](https://github.com/deepnote/deepnote)-inspired)
+
+- **SQL blocks**: a first-class **SQL** block — pick a connection (a SQLite file
+  or any SQLAlchemy URL), write SQL, and get a DataFrame rendered inline. The
+  block compiles to pandas under the hood (reusing the connectors codegen) and
+  runs through the normal execute path, so outputs, the `[n]` prompt, and autosave
+  all just work. It generalizes the cell model into a **block model**
+  (code · markdown · sql); blocks persist as valid nbformat (a code cell tagged
+  under `metadata.deepnote`), so the `.ipynb` still opens anywhere.
+- _Roadmap toward Deepnote parity_: input blocks (no-code slider/select/date →
+  variables), chart & big-number blocks, reactive execution (auto-re-run
+  dependents), an app/dashboard view, comments, and real-time collaboration.
+
 ## Architecture
 
 ```
@@ -115,14 +128,14 @@ server/                FastAPI + jupyter_client backend (Python 3.12, uv)
     connectors/        data-source registry + /api/connectors (codegen)
     ws.py              /ws/{notebook_id}: attach, dispatch, detach
     main.py            app wiring, CORS, lifespan (shutdown_all)
-  tests/               61 pytest: Phase 1 criteria + persistence/interrupt/
+  tests/               62 pytest: Phase 1 criteria + persistence/interrupt/
                        restart/complete/inspect + document round-trip + WS +
                        AI (prompt/echo/status/SSE/chat) + variables + notebooks
-                       + export + widgets (comm relay) + connectors
+                       + export + widgets (comm relay) + connectors + blocks
 web/                   Vite + React + TypeScript frontend
   src/
     lib/protocol.ts    TS mirror of models.py
-    lib/store.ts       zustand: multi-cell, append-only streams, autosave rev
+    lib/store.ts       zustand: block model (code/markdown/sql), autosave rev
     lib/ws.ts          WS client: reconnect + request/reply + comm relay
     lib/widgets.ts     live ipywidgets manager (@jupyter-widgets/html-manager)
     lib/connectors.ts  data-connector catalog + codegen REST helpers
@@ -132,7 +145,7 @@ web/                   Vite + React + TypeScript frontend
                        VariableExplorer, DataConnectors, AiChat, NotebookBrowser,
                        SidePanel,
                        outputs/ (rich MIME renderers)
-  e2e/run.mjs          Playwright smoke test of the live UI (26 checks)
+  e2e/run.mjs          Playwright smoke test of the live UI (27 checks)
 ```
 
 ## Quickstart
@@ -168,14 +181,14 @@ Shift+Tab on a symbol for docs.
 ## Verification
 
 ```bash
-cd server && uv run pytest        # 61 passed (headless, real kernel)
+cd server && uv run pytest        # 62 passed (headless, real kernel)
 
 cd web && npm run build           # typecheck + production build
 # Optional headless-browser smoke test. Start the server with
 # NBCLONE_AI_PROVIDER=echo so the AI flows run keyless; the e2e expects a fresh
 # starter, so clear server/notebooks/*.ipynb first if you've used the app:
 npx playwright install chromium
-npm run e2e                       # 26 checks, drives the real UI end-to-end
+npm run e2e                       # 27 checks, drives the real UI end-to-end
 ```
 
 The e2e check exercises markdown rendering, stdout, tracebacks, inline PNG,

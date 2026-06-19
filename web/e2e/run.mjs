@@ -281,6 +281,38 @@ try {
     .catch(() => false);
   check("data connector loads sqlite", connLoaded, "");
 
+  // 12h) SQL block: create a DB, add a SQL block, configure it via the store,
+  // run it, and see the queried value render in that block's output.
+  await setSource(
+    1,
+    "import sqlite3\n_c = sqlite3.connect('e2e_sqlblock.db')\n_c.execute('DROP TABLE IF EXISTS t')\n_c.execute('CREATE TABLE t (x)')\n_c.execute('INSERT INTO t VALUES (31337)')\n_c.commit()\n_c.close()",
+  );
+  await runAndWaitIdle(page.locator(".cell.code").first(), 1);
+  await page.locator(".btn-add-sql").click();
+  await page.evaluate(() => {
+    const st = window.__store.getState();
+    const cells = st.cells;
+    const sqlCell = cells[cells.length - 1];
+    st.setSource(sqlCell.id, "SELECT x FROM t");
+    st.setCellMetadata(sqlCell.id, {
+      connection: { type: "sqlite", db_path: "e2e_sqlblock.db" },
+      result_var: "sqldf",
+    });
+  });
+  await page.locator(".cell.sql .run-btn").last().click();
+  const sqlOk = await page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll(".cell.sql .outputs")].some(
+          (el) => el.textContent && el.textContent.includes("31337"),
+        ),
+      null,
+      { timeout: 20000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("sql block runs query", sqlOk, "");
+
   // 13) export endpoints (.ipynb + HTML)
   const ipynbResp = await page.request.get(`${BASE}/api/contents/default/export/ipynb`);
   check(

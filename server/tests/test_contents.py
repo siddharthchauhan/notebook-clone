@@ -47,6 +47,41 @@ def test_document_roundtrip_preserves_cells_and_outputs():
     assert code_outputs[2]["kind"] == "error" and code_outputs[2]["ename"] == "ValueError"
 
 
+def test_sql_block_roundtrips_as_code_cell_with_metadata():
+    """A SQL block persists as a valid-nbformat code cell tagged in metadata, and
+    comes back as cell_type 'sql' with its connection config intact."""
+    doc = {
+        "cells": [
+            {
+                "id": "q1",
+                "cell_type": "sql",
+                "source": "SELECT * FROM t",
+                "outputs": [
+                    {"kind": "display", "data": {"text/plain": "ok"}, "metadata": {}}
+                ],
+                "execution_count": 3,
+                "metadata": {
+                    "connection": {"type": "sqlite", "db_path": "data.db"},
+                    "result_var": "df",
+                },
+            }
+        ],
+        "metadata": {},
+    }
+
+    nb = store.document_to_notebook(doc)
+    nbformat.validate(nb)  # SQL blocks must remain valid nbformat on disk
+    assert nb.cells[0].cell_type == "code"
+    assert nb.cells[0].metadata["deepnote"]["block_type"] == "sql"
+
+    back = store.notebook_to_document(nb)["cells"][0]
+    assert back["cell_type"] == "sql"
+    assert back["source"] == "SELECT * FROM t"
+    assert back["metadata"]["connection"] == {"type": "sqlite", "db_path": "data.db"}
+    assert "block_type" not in back["metadata"]  # surfaced as cell_type, not config
+    assert back["execution_count"] == 3
+
+
 def test_save_and_load_document(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "NOTEBOOKS_DIR", tmp_path)
     doc = {

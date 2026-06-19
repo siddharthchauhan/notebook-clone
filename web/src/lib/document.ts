@@ -3,7 +3,7 @@
 // Output type intentionally matches the server's document output shape, so
 // outputs pass through unchanged.
 
-import type { CellState, CellType, Output } from "./store";
+import type { CellMetadata, CellState, CellType, Output } from "./store";
 
 interface DocCell {
   id: string;
@@ -11,6 +11,7 @@ interface DocCell {
   source: string;
   outputs: Output[];
   execution_count: number | null;
+  metadata?: CellMetadata;
 }
 
 interface NotebookDoc {
@@ -20,16 +21,19 @@ interface NotebookDoc {
 
 export function documentToCells(doc: { cells?: DocCell[] }): CellState[] {
   return (doc.cells ?? []).map((c) => {
-    const cell_type: CellType = c.cell_type === "markdown" ? "markdown" : "code";
+    const cell_type: CellType =
+      c.cell_type === "markdown" ? "markdown" : c.cell_type === "sql" ? "sql" : "code";
     return {
       id: c.id,
       cell_type,
       source: c.source ?? "",
-      outputs: cell_type === "code" ? (c.outputs ?? []) : [],
+      // sql blocks produce outputs like code cells; only markdown has none.
+      outputs: cell_type !== "markdown" ? (c.outputs ?? []) : [],
       execution_state: "idle",
       execution_count: c.execution_count ?? null,
       // Markdown loaded from disk starts rendered; empty markdown opens for edit.
       rendered: cell_type === "markdown" && (c.source ?? "").length > 0,
+      metadata: c.metadata,
     };
   });
 }
@@ -40,8 +44,9 @@ function cellsToDocument(cells: CellState[]): NotebookDoc {
       id: c.id,
       cell_type: c.cell_type,
       source: c.source,
-      outputs: c.cell_type === "code" ? c.outputs : [],
+      outputs: c.cell_type !== "markdown" ? c.outputs : [],
       execution_count: c.execution_count,
+      metadata: c.metadata ?? {},
     })),
     metadata: {},
   };

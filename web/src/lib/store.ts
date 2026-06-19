@@ -8,8 +8,21 @@ export type Output =
   | { kind: "display"; data: Record<string, unknown>; metadata?: Record<string, unknown> }
   | { kind: "error"; ename: string; evalue: string; traceback: string[] };
 
-export type CellType = "code" | "markdown";
+export type CellType = "code" | "markdown" | "sql";
 export type ExecutionState = "idle" | "busy" | "starting" | "queued";
+
+// Per-block config (Deepnote-style blocks). SQL blocks carry their connection
+// and target variable here; code/markdown leave it undefined.
+export interface SqlConnection {
+  type: "sqlite" | "sqlalchemy";
+  db_path?: string;
+  url?: string;
+}
+export interface CellMetadata {
+  connection?: SqlConnection;
+  result_var?: string;
+  [k: string]: unknown;
+}
 
 export interface CellState {
   id: string;
@@ -19,6 +32,15 @@ export interface CellState {
   execution_state: ExecutionState;
   execution_count: number | null;
   rendered: boolean; // markdown cells: showing the rendered view vs. editor
+  metadata?: CellMetadata; // block config (e.g. SQL connection + result var)
+}
+
+// A fresh SQL block defaults to a SQLite connection writing into `df`.
+function defaultMetadata(cell_type: CellType): CellMetadata | undefined {
+  if (cell_type === "sql") {
+    return { connection: { type: "sqlite", db_path: "" }, result_var: "df" };
+  }
+  return undefined;
 }
 
 export type KernelStatus = "connecting" | "ready" | "restarting" | "dead";
@@ -38,6 +60,7 @@ export function emptyCell(cell_type: CellType = "code", source = ""): CellState 
     // New cells open in edit mode; a markdown cell seeded with content (e.g.
     // from AI) opens rendered so it reads as finished, not a draft.
     rendered: cell_type === "markdown" && source.length > 0,
+    metadata: defaultMetadata(cell_type),
   };
 }
 
@@ -59,6 +82,7 @@ interface NotebookStore {
   deleteCell: (cellId: string) => void;
   moveCell: (cellId: string, dir: -1 | 1) => void;
   setCellType: (cellId: string, cell_type: CellType) => void;
+  setCellMetadata: (cellId: string, patch: CellMetadata) => void;
   setRendered: (cellId: string, rendered: boolean) => void;
   clearOutputs: (cellId: string) => void;
   markQueued: (cellId: string) => void;
@@ -131,6 +155,17 @@ export const useStore = create<NotebookStore>((set, get) => ({
         cell_type,
         outputs: cell_type === "markdown" ? [] : c.outputs,
         rendered: cell_type === "markdown" ? false : c.rendered,
+        // Seed block config when switching into a block type that needs it.
+        metadata: c.metadata ?? defaultMetadata(cell_type),
+      })),
+      revision: s.revision + 1,
+    })),
+
+  setCellMetadata: (cellId, patch) =>
+    set((s) => ({
+      cells: mapCell(s.cells, cellId, (c) => ({
+        ...c,
+        metadata: { ...(c.metadata ?? {}), ...patch },
       })),
       revision: s.revision + 1,
     })),

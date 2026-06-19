@@ -710,6 +710,52 @@ select {
   color: #b00020;
   white-space: pre-wrap;
 }
+.sql-config {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #f3f6fb;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  font-size: 12.5px;
+}
+.sql-conn-type {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.sql-conn-param {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12.5px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.sql-into {
+  color: var(--muted);
+}
+.sql-var {
+  width: 88px;
+  font: inherit;
+  font-size: 12.5px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.sql-error {
+  color: #b00020;
+  font-size: 12.5px;
+  padding: 4px 8px;
+  white-space: pre-wrap;
+}
 .output.widget {
   margin: 4px 0;
 }
