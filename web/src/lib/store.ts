@@ -8,7 +8,7 @@ export type Output =
   | { kind: "display"; data: Record<string, unknown>; metadata?: Record<string, unknown> }
   | { kind: "error"; ename: string; evalue: string; traceback: string[] };
 
-export type CellType = "code" | "markdown" | "sql" | "input" | "chart";
+export type CellType = "code" | "markdown" | "sql" | "input" | "chart" | "kpi";
 export type ExecutionState = "idle" | "busy" | "starting" | "queued";
 
 // Per-block config (Deepnote-style blocks). SQL blocks carry their connection
@@ -37,6 +37,10 @@ export interface CellMetadata {
   x?: string;
   y?: string;
   title?: string;
+  // kpi block
+  expression?: string;
+  label?: string;
+  number_format?: string;
   [k: string]: unknown;
 }
 
@@ -62,6 +66,9 @@ function defaultMetadata(cell_type: CellType): CellMetadata | undefined {
   }
   if (cell_type === "chart") {
     return { df: "", chart_type: "line", x: "", y: "" };
+  }
+  if (cell_type === "kpi") {
+    return { expression: "", label: "Metric" };
   }
   return undefined;
 }

@@ -13,13 +13,14 @@ import { OutputView } from "./outputs";
 import { AiAssist } from "./AiAssist";
 import { generateConnectorCode } from "../lib/connectors";
 import { generateChartCode, CHART_TYPES } from "../lib/charts";
+import { generateKpiCode } from "../lib/kpi";
 import { reactiveRerun } from "../lib/reactive";
 import { renderMarkdown } from "../lib/markdown";
 import { stripAnsi } from "../lib/ansi";
 
-// Code, SQL, and chart blocks run code and show an [n] prompt + outputs.
+// Code, SQL, chart, and KPI blocks run code and show an [n] prompt + outputs.
 function isExecutable(t: CellType): boolean {
-  return t === "code" || t === "sql" || t === "chart";
+  return t === "code" || t === "sql" || t === "chart" || t === "kpi";
 }
 
 // Bind an input block's variable in the kernel from its current metadata. Runs
@@ -77,6 +78,29 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
     }
   };
 
+  // A KPI block evaluates an expression and renders a big number (HTML output).
+  const runKpi = async () => {
+    const latest = useStore.getState().cells.find((c) => c.id === cellId);
+    if (!latest) return;
+    if (latest.execution_state === "busy" || latest.execution_state === "queued") return;
+    const m = (latest.metadata ?? {}) as CellMetadata;
+    setChartError(null);
+    try {
+      const code = await generateKpiCode({
+        expression: m.expression ?? "",
+        label: m.label ?? "",
+        number_format: m.number_format ?? "",
+      });
+      const st = useStore.getState();
+      st.clearOutputs(cellId);
+      st.markQueued(cellId);
+      socket.execute(cellId, code);
+      void reactiveRerun(cellId, socket);
+    } catch (e) {
+      setChartError(e instanceof Error ? e.message : "could not render KPI");
+    }
+  };
+
   // A SQL block compiles to pandas code (via the connectors endpoint) and runs
   // through the normal execute path, so its DataFrame renders like any output.
   const runSql = async () => {
@@ -130,6 +154,10 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
       void runChart();
       return;
     }
+    if (latest.cell_type === "kpi") {
+      void runKpi();
+      return;
+    }
     // Already running or waiting its turn — don't double-submit.
     if (latest.execution_state === "busy" || latest.execution_state === "queued") return;
     setInspect(null);
@@ -153,6 +181,8 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
           <InputBlock cellId={cell.id} metadata={cell.metadata} socket={socket} />
         ) : cell.cell_type === "chart" ? (
           <ChartConfig cellId={cell.id} metadata={cell.metadata} socket={socket} />
+        ) : cell.cell_type === "kpi" ? (
+          <KpiConfig cellId={cell.id} metadata={cell.metadata} />
         ) : showRenderedMarkdown ? (
           <div
             className="markdown-rendered"
@@ -535,6 +565,36 @@ function ChartConfig({
   );
 }
 
+// A no-code KPI block: a Python expression + a label (and optional number
+// format). Reads in the expression make it reactive — it re-runs when they move.
+function KpiConfig({ cellId, metadata }: { cellId: string; metadata?: CellMetadata }) {
+  const m = metadata ?? {};
+  const set = (patch: CellMetadata) => useStore.getState().setCellMetadata(cellId, patch);
+  return (
+    <div className="kpi-config">
+      <input
+        className="kpi-label-input"
+        placeholder="Label (e.g. Total revenue)"
+        value={m.label ?? ""}
+        onChange={(e) => set({ label: e.target.value })}
+      />
+      <input
+        className="kpi-expr-input"
+        placeholder="Expression (e.g. df['rev'].sum())"
+        value={m.expression ?? ""}
+        onChange={(e) => set({ expression: e.target.value })}
+      />
+      <input
+        className="kpi-format-input"
+        placeholder="format (e.g. ,.2f)"
+        value={m.number_format ?? ""}
+        onChange={(e) => set({ number_format: e.target.value })}
+        title="Optional Python format spec"
+      />
+    </div>
+  );
+}
+
 function CellToolbar({ cell, onRun }: { cell: CellState; onRun: () => void }) {
   const { addCell, deleteCell, moveCell, setCellType } = useStore.getState();
 
@@ -577,6 +637,7 @@ function CellToolbar({ cell, onRun }: { cell: CellState; onRun: () => void }) {
         <option value="sql">SQL</option>
         <option value="input">Input</option>
         <option value="chart">Chart</option>
+        <option value="kpi">KPI</option>
       </select>
       <button onClick={() => moveCell(cell.id, -1)} title="Move up">
         ↑

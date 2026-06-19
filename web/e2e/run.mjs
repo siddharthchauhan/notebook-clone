@@ -445,6 +445,27 @@ try {
   );
   check("edit view restores editors", editorsBack > 0, `editors=${editorsBack}`);
 
+  // 12m) KPI block: evaluate an expression over a DataFrame, render a big number.
+  await page.locator(".btn-add-kpi").click();
+  await page.evaluate(() => {
+    const st = window.__store.getState();
+    const kpi = st.cells[st.cells.length - 1];
+    st.setCellMetadata(kpi.id, { expression: "cdf['b'].sum()", label: "Total B" });
+  });
+  await page.locator(".cell.kpi .run-btn").last().click();
+  const kpiOk = await page
+    .waitForFunction(
+      () => {
+        const v = document.querySelector(".cell.kpi .kpi-value");
+        return v && v.textContent && v.textContent.includes("60");
+      },
+      null,
+      { timeout: 20000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("kpi block renders a metric", kpiOk, "");
+
   // 13) export endpoints (.ipynb + HTML)
   const ipynbResp = await page.request.get(`${BASE}/api/contents/default/export/ipynb`);
   check(

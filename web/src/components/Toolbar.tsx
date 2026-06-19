@@ -1,6 +1,7 @@
 import { useStore, type CellMetadata, type SqlConnection } from "../lib/store";
 import { generateConnectorCode } from "../lib/connectors";
 import { generateChartCode } from "../lib/charts";
+import { generateKpiCode } from "../lib/kpi";
 import type { NotebookSocket } from "../lib/ws";
 import type { Checkpoint, KernelSpec } from "../lib/document";
 import type { PanelTab } from "./SidePanel";
@@ -89,6 +90,19 @@ export function Toolbar({
         } catch {
           /* skip a misconfigured chart block */
         }
+      } else if (cell.cell_type === "kpi") {
+        try {
+          const code = await generateKpiCode({
+            expression: m.expression ?? "",
+            label: m.label ?? "",
+            number_format: m.number_format ?? "",
+          });
+          state.clearOutputs(cell.id);
+          state.markQueued(cell.id);
+          socket.execute(cell.id, code);
+        } catch {
+          /* skip a KPI block with no expression yet */
+        }
       } else {
         state.clearOutputs(cell.id);
         state.markQueued(cell.id);
@@ -140,6 +154,7 @@ export function Toolbar({
             <button className="btn-add-sql" onClick={() => useStore.getState().addCell(null, "sql")} title="Add a SQL block">+ SQL</button>
             <button className="btn-add-input" onClick={() => useStore.getState().addCell(null, "input")} title="Add an input block">+ Input</button>
             <button className="btn-add-chart" onClick={() => useStore.getState().addCell(null, "chart")} title="Add a chart block">+ Chart</button>
+            <button className="btn-add-kpi" onClick={() => useStore.getState().addCell(null, "kpi")} title="Add a big-number block">+ KPI</button>
             <button
               className={`btn-reactive${reactive ? " on" : ""}`}
               onClick={() => useStore.getState().setReactive(!reactive)}

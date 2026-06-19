@@ -8,6 +8,7 @@
 
 import { generateConnectorCode } from "./connectors";
 import { generateChartCode } from "./charts";
+import { generateKpiCode } from "./kpi";
 import { useStore, type CellState, type CellMetadata } from "./store";
 import type { NotebookSocket } from "./ws";
 
@@ -17,10 +18,17 @@ export interface Deps {
 }
 
 export async function analyzeCells(cells: CellState[]): Promise<Map<string, Deps>> {
-  // Only Python code cells need the AST endpoint; other blocks' writes are known.
+  // Code cells and KPI expressions are Python — analyze them for reads/writes via
+  // the AST endpoint. Other blocks' reads/writes are known from their metadata.
   const codeCells = cells
-    .filter((c) => c.cell_type === "code")
-    .map((c) => ({ id: c.id, source: c.source }));
+    .filter((c) => c.cell_type === "code" || c.cell_type === "kpi")
+    .map((c) => ({
+      id: c.id,
+      source:
+        c.cell_type === "kpi"
+          ? ((c.metadata?.expression as string) ?? "")
+          : c.source,
+    }));
 
   const serverDeps: Record<string, Deps> = {};
   if (codeCells.length) {
@@ -53,6 +61,9 @@ export async function analyzeCells(cells: CellState[]): Promise<Map<string, Deps
       // A chart reads its source DataFrame, so it re-runs when that frame changes.
       const d = (m.df ?? "").trim();
       map.set(c.id, { reads: d ? [d] : [], writes: [] });
+    } else if (c.cell_type === "kpi") {
+      // A KPI reads the names in its expression (analyzed above); it writes none.
+      map.set(c.id, { reads: serverDeps[c.id]?.reads ?? [], writes: [] });
     } else {
       map.set(c.id, { reads: [], writes: [] });
     }
@@ -111,6 +122,18 @@ async function codeForCell(c: CellState): Promise<string | null> {
         x: m.x ?? "",
         y: m.y ?? "",
         title: m.title ?? "",
+      });
+    } catch {
+      return null;
+    }
+  }
+  if (c.cell_type === "kpi") {
+    const m = (c.metadata ?? {}) as CellMetadata;
+    try {
+      return await generateKpiCode({
+        expression: m.expression ?? "",
+        label: m.label ?? "",
+        number_format: m.number_format ?? "",
       });
     } catch {
       return null;
