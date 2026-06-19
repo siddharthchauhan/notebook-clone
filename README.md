@@ -140,7 +140,10 @@ back to the browser, **correctly correlated by cell**.
   AI). `GET /api/auth` reports whether a token is required.
 - _Remaining toward full Deepnote parity_: conflict-free (CRDT) merge for
   simultaneous edits to the **same** cell (today it's last-writer-wins per cell),
-  and multi-user identity / per-notebook sharing roles.
+  and multi-user identity / per-notebook sharing roles. The CRDT layer is
+  specified in [docs/crdt-collaboration.md](docs/crdt-collaboration.md) — it's
+  scoped as a separate effort because, done halfway, it corrupts documents rather
+  than merging them, so it's all-or-nothing.
 
 ## Architecture
 
