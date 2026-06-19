@@ -20,6 +20,7 @@ web/dist/
 # Runtime notebook data (seeded from the hardcoded starter)
 server/notebooks/*.ipynb
 server/notebooks/.checkpoints/
+server/notebooks/.comments/
 
 # Env / editor
 .env
