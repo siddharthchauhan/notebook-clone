@@ -39,6 +39,7 @@ from app.models import (
     KernelStatusEvent,
     StatusEvent,
     VariableChildrenReplyEvent,
+    ColumnsReplyEvent,
     VariablesReplyEvent,
 )
 
@@ -297,6 +298,22 @@ class KernelSession:
         self.kc.shell_channel.send(msg)
         return msg["header"]["msg_id"]
 
+    def df_columns(self, request_id: str, name: str) -> str:
+        """List a DataFrame global's column names (chart-block pickers)."""
+        if name.isidentifier():
+            # name is validated as an identifier, so this can't inject.
+            code = (
+                "import json as __cj\n"
+                "try:\n"
+                f"    print(__cj.dumps([str(__c) for __c in {name}.columns]))\n"
+                "except Exception:\n"
+                "    print('[]')\n"
+                "del __cj\n"
+            )
+        else:
+            code = "print('[]')"
+        return self._run_variables(request_id, code, kind="columns", name=name)
+
     def variable_children(self, request_id: str, name: str) -> str:
         """List the direct children of one container global (explorer expand)."""
         if name.isidentifier():
@@ -458,6 +475,12 @@ class KernelSession:
                 await self._broadcast(
                     VariableChildrenReplyEvent(
                         request_id=cap.request_id, name=cap.name or "", children=payload
+                    ).model_dump()
+                )
+            elif cap.kind == "columns":
+                await self._broadcast(
+                    ColumnsReplyEvent(
+                        request_id=cap.request_id, name=cap.name or "", columns=payload
                     ).model_dump()
                 )
             else:

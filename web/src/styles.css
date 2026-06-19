@@ -824,6 +824,43 @@ select {
   font-size: 12px;
   white-space: nowrap;
 }
+
+/* chart blocks (no-code DataFrame visualization) */
+.chart-config {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #f3f6fb;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  flex-wrap: wrap;
+}
+.chart-df {
+  font: inherit;
+  font-size: 12.5px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  width: 150px;
+}
+.chart-type,
+.chart-x,
+.chart-y {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.chart-axis {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
 .output.widget {
   margin: 4px 0;
 }

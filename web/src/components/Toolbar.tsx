@@ -1,5 +1,6 @@
 import { useStore, type CellMetadata, type SqlConnection } from "../lib/store";
 import { generateConnectorCode } from "../lib/connectors";
+import { generateChartCode } from "../lib/charts";
 import type { NotebookSocket } from "../lib/ws";
 import type { Checkpoint, KernelSpec } from "../lib/document";
 import type { PanelTab } from "./SidePanel";
@@ -72,6 +73,21 @@ export function Toolbar({
         } catch {
           /* skip a misconfigured SQL block */
         }
+      } else if (cell.cell_type === "chart") {
+        try {
+          const code = await generateChartCode({
+            df: m.df ?? "",
+            chart_type: m.chart_type ?? "line",
+            x: m.x ?? "",
+            y: m.y ?? "",
+            title: m.title ?? "",
+          });
+          state.clearOutputs(cell.id);
+          state.markQueued(cell.id);
+          socket.execute(cell.id, code);
+        } catch {
+          /* skip a misconfigured chart block */
+        }
       } else {
         state.clearOutputs(cell.id);
         state.markQueued(cell.id);
@@ -112,6 +128,7 @@ export function Toolbar({
         <button className="btn-add-cell" onClick={() => useStore.getState().addCell(null, "code")} title="Add a code cell">+ Cell</button>
         <button className="btn-add-sql" onClick={() => useStore.getState().addCell(null, "sql")} title="Add a SQL block">+ SQL</button>
         <button className="btn-add-input" onClick={() => useStore.getState().addCell(null, "input")} title="Add an input block">+ Input</button>
+        <button className="btn-add-chart" onClick={() => useStore.getState().addCell(null, "chart")} title="Add a chart block">+ Chart</button>
         <button
           className={`btn-reactive${reactive ? " on" : ""}`}
           onClick={() => useStore.getState().setReactive(!reactive)}

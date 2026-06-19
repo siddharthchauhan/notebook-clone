@@ -83,6 +83,33 @@ async def test_set_variable_binds_value_and_returns_variables(kernel):
     assert "84" in out["text"]
 
 
+async def test_df_columns_lists_dataframe_columns(kernel):
+    """Chart blocks ask for a DataFrame's columns; introspection is diverted, so
+    it never leaks output to a cell."""
+    session, collector = kernel
+    session.execute(
+        "c1", "import pandas as pd\nframe = pd.DataFrame({'a': [1], 'b': [2], 'c': [3]})"
+    )
+    await collector.wait_idle("c1")
+
+    session.df_columns("cols-1", "frame")
+    reply = await collector.wait_event(
+        lambda e: e.get("type") == "columns_reply" and e.get("request_id") == "cols-1"
+    )
+    assert reply["columns"] == ["a", "b", "c"]
+    assert reply["name"] == "frame"
+    assert not any(e.get("type") == "stream" for e in collector.events)
+
+
+async def test_df_columns_on_missing_or_bad_name_is_empty(kernel):
+    session, collector = kernel
+    session.df_columns("cols-2", "not_a_df")
+    reply = await collector.wait_event(
+        lambda e: e.get("type") == "columns_reply" and e.get("request_id") == "cols-2"
+    )
+    assert reply["columns"] == []
+
+
 async def test_set_variable_quotes_strings_and_rejects_bad_name(kernel):
     """A string value is emitted as a literal (no injection), and a non-identifier
     name binds nothing."""

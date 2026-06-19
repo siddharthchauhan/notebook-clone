@@ -1,6 +1,7 @@
 import type {
   ClientEvent,
   ClientRequest,
+  ColumnsReplyEvent,
   CompleteReplyEvent,
   InspectReplyEvent,
   VariableChildrenReplyEvent,
@@ -13,7 +14,8 @@ type ReplyEvent =
   | CompleteReplyEvent
   | InspectReplyEvent
   | VariablesReplyEvent
-  | VariableChildrenReplyEvent;
+  | VariableChildrenReplyEvent
+  | ColumnsReplyEvent;
 
 // WebSocket client for one notebook. Output/status events are dispatched into
 // the store; complete/inspect replies resolve the matching pending promise by
@@ -59,7 +61,8 @@ export class NotebookSocket {
         event.type === "complete_reply" ||
         event.type === "inspect_reply" ||
         event.type === "variables_reply" ||
-        event.type === "variable_children_reply"
+        event.type === "variable_children_reply" ||
+        event.type === "columns_reply"
       ) {
         const resolve = this.pending.get(event.request_id);
         if (resolve) {
@@ -198,6 +201,15 @@ export class NotebookSocket {
       request_id: crypto.randomUUID(),
       name,
       value,
+    });
+  }
+
+  // A DataFrame's column names (chart-block X/Y pickers).
+  columns(name: string): Promise<ColumnsReplyEvent> {
+    return this.request<ColumnsReplyEvent>({
+      type: "columns_request",
+      request_id: crypto.randomUUID(),
+      name,
     });
   }
 

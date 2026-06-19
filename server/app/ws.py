@@ -36,6 +36,7 @@ from app.models import (
     RestartRequest,
     VariableChildrenRequest,
     SetVariableRequest,
+    ColumnsRequest,
     VariablesRequest,
 )
 
@@ -104,6 +105,8 @@ async def _dispatch(session: KernelSession, request: ClientRequest) -> None:
         session.variable_children(request.request_id, request.name)
     elif isinstance(request, SetVariableRequest):
         session.set_variable(request.request_id, request.name, request.value)
+    elif isinstance(request, ColumnsRequest):
+        session.df_columns(request.request_id, request.name)
     elif isinstance(request, CommOpenRequest):
         session.comm_open(
             request.comm_id,

@@ -387,6 +387,38 @@ try {
     .catch(() => false);
   check("reactive re-run on input change", reactiveOk, "");
 
+  // 12k) chart block: build a DataFrame, chart it, and see a PNG figure render.
+  await page.locator(".btn-add-cell").click();
+  const cdfIdx = await page.evaluate(() => {
+    const st = window.__store.getState();
+    const idx = st.cells.length - 1;
+    st.setSource(
+      st.cells[idx].id,
+      "import pandas as pd\ncdf = pd.DataFrame({'a': [1, 2, 3], 'b': [10, 20, 30]})",
+    );
+    return idx;
+  });
+  await runAndWaitIdle(page.locator(".cell.code").last(), cdfIdx);
+  await page.locator(".btn-add-chart").click();
+  await page.evaluate(() => {
+    const st = window.__store.getState();
+    const chart = st.cells[st.cells.length - 1];
+    st.setCellMetadata(chart.id, { df: "cdf", chart_type: "bar", x: "a", y: "b" });
+  });
+  await page.locator(".cell.chart .run-btn").last().click();
+  const chartImg = await page
+    .waitForFunction(
+      () => {
+        const img = document.querySelector(".cell.chart img.output.image");
+        return img && img.getAttribute("src")?.startsWith("data:image/png;base64,");
+      },
+      null,
+      { timeout: 20000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check("chart block renders a figure", chartImg, "");
+
   // 13) export endpoints (.ipynb + HTML)
   const ipynbResp = await page.request.get(`${BASE}/api/contents/default/export/ipynb`);
   check(

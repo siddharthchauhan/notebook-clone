@@ -93,6 +93,14 @@ class SetVariableRequest(BaseModel):
     value: bool | int | float | str
 
 
+class ColumnsRequest(BaseModel):
+    """Ask the kernel for a DataFrame's columns (chart-block pickers)."""
+
+    type: Literal["columns_request"] = "columns_request"
+    request_id: str
+    name: str
+
+
 # ipywidgets uses the Jupyter *comm* protocol: the frontend widget manager and
 # the kernel-side Widget objects sync state by exchanging comm messages. These
 # three carry a frontend-originated comm message to the kernel's shell channel.
@@ -132,6 +140,7 @@ ClientRequest = Annotated[
         DeleteVariableRequest,
         VariableChildrenRequest,
         SetVariableRequest,
+        ColumnsRequest,
         CommOpenRequest,
         CommMsgRequest,
         CommCloseRequest,
@@ -239,6 +248,15 @@ class VariableChildrenReplyEvent(BaseModel):
     children: list[dict[str, Any]]
 
 
+class ColumnsReplyEvent(BaseModel):
+    """A DataFrame's column names, for chart blocks' X/Y pickers."""
+
+    type: Literal["columns_reply"] = "columns_reply"
+    request_id: str
+    name: str
+    columns: list[str]
+
+
 # Kernel-originated comm messages (ipywidgets). These are *not* cell-scoped — a
 # widget model is global and may update from any cell's interaction — so they
 # broadcast to every attached socket and are routed by ``comm_id`` in the
@@ -280,6 +298,7 @@ ClientEvent = Annotated[
         InspectReplyEvent,
         VariablesReplyEvent,
         VariableChildrenReplyEvent,
+        ColumnsReplyEvent,
         CommOpenEvent,
         CommMsgEvent,
         CommCloseEvent,

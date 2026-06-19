@@ -7,6 +7,7 @@
 // notebook order, so a chain A → B → C re-runs in order.
 
 import { generateConnectorCode } from "./connectors";
+import { generateChartCode } from "./charts";
 import { useStore, type CellState, type CellMetadata } from "./store";
 import type { NotebookSocket } from "./ws";
 
@@ -48,6 +49,10 @@ export async function analyzeCells(cells: CellState[]): Promise<Map<string, Deps
     } else if (c.cell_type === "input") {
       const v = (m.var_name ?? "").trim();
       map.set(c.id, { reads: [], writes: v ? [v] : [] });
+    } else if (c.cell_type === "chart") {
+      // A chart reads its source DataFrame, so it re-runs when that frame changes.
+      const d = (m.df ?? "").trim();
+      map.set(c.id, { reads: d ? [d] : [], writes: [] });
     } else {
       map.set(c.id, { reads: [], writes: [] });
     }
@@ -93,6 +98,20 @@ async function codeForCell(c: CellState): Promise<string | null> {
         conn.type === "sqlalchemy" ? "sqlalchemy" : "sqlite",
         params,
       );
+    } catch {
+      return null;
+    }
+  }
+  if (c.cell_type === "chart") {
+    const m = (c.metadata ?? {}) as CellMetadata;
+    try {
+      return await generateChartCode({
+        df: m.df ?? "",
+        chart_type: m.chart_type ?? "line",
+        x: m.x ?? "",
+        y: m.y ?? "",
+        title: m.title ?? "",
+      });
     } catch {
       return null;
     }

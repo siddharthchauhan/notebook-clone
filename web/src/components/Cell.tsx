@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useStore,
   type CellMetadata,
@@ -12,13 +12,14 @@ import { Editor } from "./Editor";
 import { OutputView } from "./outputs";
 import { AiAssist } from "./AiAssist";
 import { generateConnectorCode } from "../lib/connectors";
+import { generateChartCode, CHART_TYPES } from "../lib/charts";
 import { reactiveRerun } from "../lib/reactive";
 import { renderMarkdown } from "../lib/markdown";
 import { stripAnsi } from "../lib/ansi";
 
-// Only code and SQL blocks run code and show an [n] prompt + outputs.
+// Code, SQL, and chart blocks run code and show an [n] prompt + outputs.
 function isExecutable(t: CellType): boolean {
-  return t === "code" || t === "sql";
+  return t === "code" || t === "sql" || t === "chart";
 }
 
 // Bind an input block's variable in the kernel from its current metadata. Runs
@@ -42,7 +43,34 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
   const cell = useStore((s) => s.cells.find((c) => c.id === cellId));
   const [inspect, setInspect] = useState<string | null>(null);
   const [sqlError, setSqlError] = useState<string | null>(null);
+  const [chartError, setChartError] = useState<string | null>(null);
   if (!cell) return null;
+
+  // A chart block compiles to matplotlib (via /api/charts) and runs through the
+  // normal execute path, so the figure renders inline like any plot.
+  const runChart = async () => {
+    const latest = useStore.getState().cells.find((c) => c.id === cellId);
+    if (!latest) return;
+    if (latest.execution_state === "busy" || latest.execution_state === "queued") return;
+    const m = (latest.metadata ?? {}) as CellMetadata;
+    setChartError(null);
+    try {
+      const code = await generateChartCode({
+        df: m.df ?? "",
+        chart_type: m.chart_type ?? "line",
+        x: m.x ?? "",
+        y: m.y ?? "",
+        title: m.title ?? "",
+      });
+      const st = useStore.getState();
+      st.clearOutputs(cellId);
+      st.markQueued(cellId);
+      socket.execute(cellId, code);
+      void reactiveRerun(cellId, socket);
+    } catch (e) {
+      setChartError(e instanceof Error ? e.message : "could not render chart");
+    }
+  };
 
   // A SQL block compiles to pandas code (via the connectors endpoint) and runs
   // through the normal execute path, so its DataFrame renders like any output.
@@ -93,6 +121,10 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
       void bindInput(cellId, socket);
       return;
     }
+    if (latest.cell_type === "chart") {
+      void runChart();
+      return;
+    }
     // Already running or waiting its turn — don't double-submit.
     if (latest.execution_state === "busy" || latest.execution_state === "queued") return;
     setInspect(null);
@@ -114,6 +146,8 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
 
         {cell.cell_type === "input" ? (
           <InputBlock cellId={cell.id} metadata={cell.metadata} socket={socket} />
+        ) : cell.cell_type === "chart" ? (
+          <ChartConfig cellId={cell.id} metadata={cell.metadata} socket={socket} />
         ) : showRenderedMarkdown ? (
           <div
             className="markdown-rendered"
@@ -135,6 +169,7 @@ export function Cell({ cellId, socket }: { cellId: string; socket: NotebookSocke
         )}
 
         {sqlError && <div className="sql-error">{sqlError}</div>}
+        {chartError && <div className="sql-error">{chartError}</div>}
 
         {inspect != null && (
           <div className="inspect-panel">
@@ -359,6 +394,96 @@ function InputBlock({
   );
 }
 
+// A no-code chart block: pick a DataFrame, a chart type, and X/Y columns. The
+// column pickers auto-populate from the kernel (the DataFrame's actual columns).
+function ChartConfig({
+  cellId,
+  metadata,
+  socket,
+}: {
+  cellId: string;
+  metadata?: CellMetadata;
+  socket: NotebookSocket;
+}) {
+  const m = metadata ?? {};
+  const df = m.df ?? "";
+  const x = m.x ?? "";
+  const y = m.y ?? "";
+  const [columns, setColumns] = useState<string[]>([]);
+  const set = (patch: CellMetadata) => useStore.getState().setCellMetadata(cellId, patch);
+
+  // Fetch the frame's columns whenever the chosen DataFrame name changes.
+  useEffect(() => {
+    let cancelled = false;
+    const name = df.trim();
+    if (!name) {
+      setColumns([]);
+      return;
+    }
+    socket
+      .columns(name)
+      .then((r) => {
+        if (!cancelled) setColumns(r.columns);
+      })
+      .catch(() => {
+        if (!cancelled) setColumns([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [df, socket]);
+
+  // Keep the current value selectable even before columns load (or if stale).
+  const colOptions = (current: string) => {
+    const opts = current && !columns.includes(current) ? [current, ...columns] : columns;
+    return (
+      <>
+        <option value="">—</option>
+        {opts.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </>
+    );
+  };
+
+  return (
+    <div className="chart-config">
+      <input
+        className="chart-df"
+        placeholder="DataFrame (e.g. df)"
+        value={df}
+        onChange={(e) => set({ df: e.target.value })}
+      />
+      <select
+        className="chart-type"
+        value={m.chart_type ?? "line"}
+        onChange={(e) => set({ chart_type: e.target.value })}
+        title="Chart type"
+      >
+        {CHART_TYPES.map((t) => (
+          <option key={t} value={t}>
+            {t}
+          </option>
+        ))}
+      </select>
+      <label className="chart-axis">
+        X
+        <select className="chart-x" value={x} onChange={(e) => set({ x: e.target.value })}>
+          {colOptions(x)}
+        </select>
+      </label>
+      <label className="chart-axis">
+        Y
+        <select className="chart-y" value={y} onChange={(e) => set({ y: e.target.value })}>
+          {colOptions(y)}
+        </select>
+      </label>
+    </div>
+  );
+}
+
 function CellToolbar({ cell, onRun }: { cell: CellState; onRun: () => void }) {
   const { addCell, deleteCell, moveCell, setCellType } = useStore.getState();
 
@@ -400,6 +525,7 @@ function CellToolbar({ cell, onRun }: { cell: CellState; onRun: () => void }) {
         <option value="markdown">Markdown</option>
         <option value="sql">SQL</option>
         <option value="input">Input</option>
+        <option value="chart">Chart</option>
       </select>
       <button onClick={() => moveCell(cell.id, -1)} title="Move up">
         ↑

@@ -19,13 +19,13 @@ interface NotebookDoc {
   metadata: Record<string, unknown>;
 }
 
-// Only code and SQL blocks run code and carry outputs; markdown/input don't.
+// Code, SQL, and chart blocks run code and carry outputs; markdown/input don't.
 function hasOutputs(t: CellType): boolean {
-  return t === "code" || t === "sql";
+  return t === "code" || t === "sql" || t === "chart";
 }
 
 function toCellType(t: string): CellType {
-  return t === "markdown" || t === "sql" || t === "input" ? t : "code";
+  return t === "markdown" || t === "sql" || t === "input" || t === "chart" ? t : "code";
 }
 
 export function documentToCells(doc: { cells?: DocCell[] }): CellState[] {

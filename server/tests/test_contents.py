@@ -82,6 +82,36 @@ def test_sql_block_roundtrips_as_code_cell_with_metadata():
     assert back["execution_count"] == 3
 
 
+def test_input_and_chart_blocks_roundtrip():
+    """Every block type (not just sql) must survive a save/load as its own type."""
+    doc = {
+        "cells": [
+            {
+                "id": "i1",
+                "cell_type": "input",
+                "source": "",
+                "outputs": [],
+                "metadata": {"input_type": "slider", "var_name": "thresh", "value": 42},
+            },
+            {
+                "id": "g1",
+                "cell_type": "chart",
+                "source": "",
+                "outputs": [],
+                "metadata": {"df": "df", "chart_type": "bar", "x": "a", "y": "b"},
+            },
+        ],
+        "metadata": {},
+    }
+    nb = store.document_to_notebook(doc)
+    nbformat.validate(nb)
+    back = {c["id"]: c for c in store.notebook_to_document(nb)["cells"]}
+    assert back["i1"]["cell_type"] == "input"
+    assert back["i1"]["metadata"]["var_name"] == "thresh"
+    assert back["g1"]["cell_type"] == "chart"
+    assert back["g1"]["metadata"]["chart_type"] == "bar"
+
+
 def test_save_and_load_document(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "NOTEBOOKS_DIR", tmp_path)
     doc = {

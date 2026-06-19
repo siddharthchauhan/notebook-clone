@@ -58,6 +58,12 @@ export interface SetVariableRequest {
   value: boolean | number | string;
 }
 
+export interface ColumnsRequest {
+  type: "columns_request";
+  request_id: string;
+  name: string;
+}
+
 // ipywidgets comm messages, browser -> kernel. buffers are base64 strings.
 export interface CommOpenRequest {
   type: "comm_open_request";
@@ -91,6 +97,7 @@ export type ClientRequest =
   | DeleteVariableRequest
   | VariableChildrenRequest
   | SetVariableRequest
+  | ColumnsRequest
   | CommOpenRequest
   | CommMsgRequest
   | CommCloseRequest;
@@ -188,6 +195,13 @@ export interface VariableChildrenReplyEvent {
   children: VariableChild[];
 }
 
+export interface ColumnsReplyEvent {
+  type: "columns_reply";
+  request_id: string;
+  name: string;
+  columns: string[];
+}
+
 // ipywidgets comm messages, kernel -> browser. buffers are base64 strings.
 export interface CommOpenEvent {
   type: "comm_open";
@@ -223,6 +237,7 @@ export type ClientEvent =
   | InspectReplyEvent
   | VariablesReplyEvent
   | VariableChildrenReplyEvent
+  | ColumnsReplyEvent
   | CommOpenEvent
   | CommMsgEvent
   | CommCloseEvent;

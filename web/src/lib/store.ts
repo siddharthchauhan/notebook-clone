@@ -8,7 +8,7 @@ export type Output =
   | { kind: "display"; data: Record<string, unknown>; metadata?: Record<string, unknown> }
   | { kind: "error"; ename: string; evalue: string; traceback: string[] };
 
-export type CellType = "code" | "markdown" | "sql" | "input";
+export type CellType = "code" | "markdown" | "sql" | "input" | "chart";
 export type ExecutionState = "idle" | "busy" | "starting" | "queued";
 
 // Per-block config (Deepnote-style blocks). SQL blocks carry their connection
@@ -31,6 +31,12 @@ export interface CellMetadata {
   min?: number;
   max?: number;
   step?: number;
+  // chart block
+  df?: string; // source DataFrame variable
+  chart_type?: string;
+  x?: string;
+  y?: string;
+  title?: string;
   [k: string]: unknown;
 }
 
@@ -53,6 +59,9 @@ function defaultMetadata(cell_type: CellType): CellMetadata | undefined {
   }
   if (cell_type === "input") {
     return { input_type: "slider", var_name: "x", value: 50, min: 0, max: 100, step: 1 };
+  }
+  if (cell_type === "chart") {
+    return { df: "", chart_type: "line", x: "", y: "" };
   }
   return undefined;
 }
@@ -213,12 +222,13 @@ export const useStore = create<NotebookStore>((set, get) => ({
       get().setKernel(event.state as KernelStatus, event.kernel_name);
       return;
     }
-    // complete/inspect/variables replies are resolved in ws.ts, never here.
+    // complete/inspect/variables/columns replies are resolved in ws.ts, not here.
     if (
       event.type === "complete_reply" ||
       event.type === "inspect_reply" ||
       event.type === "variables_reply" ||
-      event.type === "variable_children_reply"
+      event.type === "variable_children_reply" ||
+      event.type === "columns_reply"
     )
       return;
     // ipywidgets comm events are handled by the widget manager (see ws.ts),

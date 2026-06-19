@@ -25,6 +25,10 @@ from nbformat import NotebookNode
 NOTEBOOKS_DIR = Path(__file__).resolve().parents[2] / "notebooks"
 NBFORMAT_VERSION = 4
 
+# Block types that persist as code cells tagged in metadata (see the mapping
+# below). Kept in one place so every block round-trips without special-casing.
+_BLOCK_TYPES = {"sql", "input", "chart"}
+
 _DEFAULT_KERNELSPEC = {
     "name": "python3",
     "display_name": "Python 3",
@@ -105,7 +109,7 @@ def notebook_to_document(nb: NotebookNode) -> dict[str, Any]:
         # file stays valid nbformat; block_type is surfaced as the client type.
         meta = dict(c.get("metadata", {}).get("deepnote", {}))
         block_type = meta.pop("block_type", None)
-        cell_type = block_type if block_type in ("sql",) else nb_type
+        cell_type = block_type if block_type in _BLOCK_TYPES else nb_type
         outputs = []
         if nb_type == "code":
             outputs = [
